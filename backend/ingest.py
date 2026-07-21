@@ -343,7 +343,8 @@ def _process_audio(file_path: str, filename: str, session_id: str) -> tuple:
                 {
                     "source_file": filename,
                     "source_type": "audio",
-                    "page_or_slide": None,
+                    # No page/slide concept for audio — omit the key entirely.
+                    # ChromaDB rejects None metadata values.
                     "chunk_index": i,
                     "session_id": session_id,
                 }
@@ -373,7 +374,8 @@ def _process_image(file_path: str, filename: str, session_id: str) -> tuple:
         {
             "source_file": filename,
             "source_type": "image",
-            "page_or_slide": None,
+            # No page/slide concept for a standalone image — omit the key
+            # entirely. ChromaDB rejects None metadata values.
             "chunk_index": 0,
             "session_id": session_id,
         }

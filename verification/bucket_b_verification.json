@@ -1,0 +1,60 @@
+[
+  {
+    "timestamp": "2026-07-21T15:31:04.319568",
+    "audio_file": "sample_files\\Natural_Language_Processing.mp3",
+    "session_id": "verify_audio",
+    "passed": false,
+    "failed_stage": "whisper",
+    "error": "FileNotFoundError: [WinError 2] The system cannot find the file specified",
+    "total_time_s": 1.22,
+    "transcribe_time_s": null,
+    "transcript_char_len": null,
+    "chunk_count": null,
+    "embed_time_s": null,
+    "chroma_upsert_succeeded": false
+  },
+  {
+    "timestamp": "2026-07-21T16:11:04.576323",
+    "audio_file": "sample_files\\Natural_Language_Processing.mp3",
+    "session_id": "verify_audio",
+    "passed": false,
+    "failed_stage": "chroma",
+    "error": "ValueError: Expected metadata value to be a str, int, float or bool, got None which is a NoneType",
+    "total_time_s": 75.45,
+    "transcribe_time_s": 61.11,
+    "transcript_char_len": 7006,
+    "chunk_count": 9,
+    "embed_time_s": 14.33,
+    "chroma_upsert_succeeded": false
+  },
+  {
+    "timestamp": "2026-07-21T16:29:31.458021",
+    "audio_file": "sample_files\\Natural_Language_Processing.mp3",
+    "session_id": "verify_audio",
+    "passed": true,
+    "failed_stage": null,
+    "error": null,
+    "chunks_stored": 9,
+    "total_time_s": 67.95,
+    "transcribe_time_s": 62.18,
+    "transcript_char_len": 7006,
+    "chunk_count": 9,
+    "embed_time_s": 5.65,
+    "chroma_upsert_succeeded": true
+  },
+  {
+    "timestamp": "2026-07-21T16:45:15.463669",
+    "audio_file": "sample_files\\Natural_Language_Processing.mp3",
+    "session_id": "verify_audio",
+    "passed": true,
+    "failed_stage": null,
+    "error": null,
+    "chunks_stored": 9,
+    "total_time_s": 66.12,
+    "transcribe_time_s": 60.67,
+    "transcript_char_len": 7006,
+    "chunk_count": 9,
+    "embed_time_s": 5.36,
+    "chroma_upsert_succeeded": true
+  }
+]
