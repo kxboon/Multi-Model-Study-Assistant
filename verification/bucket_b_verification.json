@@ -56,5 +56,180 @@
     "chunk_count": 9,
     "embed_time_s": 5.36,
     "chroma_upsert_succeeded": true
+  },
+  {
+    "timestamp": "2026-08-01T22:49:11.918747",
+    "verification": "session_isolation",
+    "sessions": [
+      "iso_a",
+      "iso_b"
+    ],
+    "files": {
+      "iso_a": "sample_files/Natural_Language_Processing.mp3",
+      "iso_b": "sample_files/CM3060_L6_slide7_bayes.jpg"
+    },
+    "passed": true,
+    "failed_stage": null,
+    "error": null,
+    "checks": [
+      {
+        "check": "CHECK 1 — iso_a asked about its OWN content",
+        "question": "what is natural language processing used for",
+        "queried_session": "iso_a",
+        "forbidden_session": "iso_b",
+        "retrieval_time_s": 2.66,
+        "chunks_returned": 5,
+        "own_session_chunks": 5,
+        "forbidden_chunks_returned": 0,
+        "foreign_chunks_returned": 0,
+        "chunks": [
+          {
+            "rank": 1,
+            "session_id": "iso_a",
+            "source_file": "Natural_Language_Processing.mp3",
+            "distance": 0.3206
+          },
+          {
+            "rank": 2,
+            "session_id": "iso_a",
+            "source_file": "Natural_Language_Processing.mp3",
+            "distance": 0.4239
+          },
+          {
+            "rank": 3,
+            "session_id": "iso_a",
+            "source_file": "Natural_Language_Processing.mp3",
+            "distance": 0.4261
+          },
+          {
+            "rank": 4,
+            "session_id": "iso_a",
+            "source_file": "Natural_Language_Processing.mp3",
+            "distance": 0.4887
+          },
+          {
+            "rank": 5,
+            "session_id": "iso_a",
+            "source_file": "Natural_Language_Processing.mp3",
+            "distance": 0.5049
+          }
+        ],
+        "passed": true
+      },
+      {
+        "check": "CHECK 2 — iso_a asked about iso_b-ONLY content",
+        "question": "what is the difference between prior and posterior probability",
+        "queried_session": "iso_a",
+        "forbidden_session": "iso_b",
+        "retrieval_time_s": 0.05,
+        "chunks_returned": 5,
+        "own_session_chunks": 5,
+        "forbidden_chunks_returned": 0,
+        "foreign_chunks_returned": 0,
+        "chunks": [
+          {
+            "rank": 1,
+            "session_id": "iso_a",
+            "source_file": "Natural_Language_Processing.mp3",
+            "distance": 0.8861
+          },
+          {
+            "rank": 2,
+            "session_id": "iso_a",
+            "source_file": "Natural_Language_Processing.mp3",
+            "distance": 0.9513
+          },
+          {
+            "rank": 3,
+            "session_id": "iso_a",
+            "source_file": "Natural_Language_Processing.mp3",
+            "distance": 0.9597
+          },
+          {
+            "rank": 4,
+            "session_id": "iso_a",
+            "source_file": "Natural_Language_Processing.mp3",
+            "distance": 0.9641
+          },
+          {
+            "rank": 5,
+            "session_id": "iso_a",
+            "source_file": "Natural_Language_Processing.mp3",
+            "distance": 0.9653
+          }
+        ],
+        "passed": true
+      },
+      {
+        "check": "CHECK 3 — iso_b asked about its OWN content (swapped)",
+        "question": "what is the difference between prior and posterior probability",
+        "queried_session": "iso_b",
+        "forbidden_session": "iso_a",
+        "retrieval_time_s": 0.05,
+        "chunks_returned": 1,
+        "own_session_chunks": 1,
+        "forbidden_chunks_returned": 0,
+        "foreign_chunks_returned": 0,
+        "chunks": [
+          {
+            "rank": 1,
+            "session_id": "iso_b",
+            "source_file": "CM3060_L6_slide7_bayes.jpg",
+            "distance": 0.5239
+          }
+        ],
+        "passed": true
+      },
+      {
+        "check": "CHECK 4 — iso_b asked about iso_a-ONLY content (swapped)",
+        "question": "what is natural language processing used for",
+        "queried_session": "iso_b",
+        "forbidden_session": "iso_a",
+        "retrieval_time_s": 0.04,
+        "chunks_returned": 1,
+        "own_session_chunks": 1,
+        "forbidden_chunks_returned": 0,
+        "foreign_chunks_returned": 0,
+        "chunks": [
+          {
+            "rank": 1,
+            "session_id": "iso_b",
+            "source_file": "CM3060_L6_slide7_bayes.jpg",
+            "distance": 0.8256
+          }
+        ],
+        "passed": true
+      },
+      {
+        "check": "endpoint_guard",
+        "passed": true,
+        "skipped": false,
+        "cases": [
+          {
+            "case": "missing session_id",
+            "status": 400,
+            "detail": "session_id is required. Select a module before asking a question — an empty session_id would search all modules.",
+            "passed": true
+          },
+          {
+            "case": "blank session_id",
+            "status": 400,
+            "detail": "session_id is required. Select a module before asking a question — an empty session_id would search all modules.",
+            "passed": true
+          },
+          {
+            "case": "empty session_id",
+            "status": 400,
+            "detail": "session_id is required. Select a module before asking a question — an empty session_id would search all modules.",
+            "passed": true
+          }
+        ]
+      }
+    ],
+    "chunks_ingested": {
+      "iso_a": 9,
+      "iso_b": 1
+    },
+    "total_time_s": 91.3
   }
 ]

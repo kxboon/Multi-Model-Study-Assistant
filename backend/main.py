@@ -20,11 +20,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from ingest import ingest_file
-from retrieve import query_rag, ask_ollama
+from backend.ingest import ingest_file
+from backend.retrieve import query_rag, ask_ollama
 # Reuse the retrieval module's existing collection handle for /sessions so we
 # don't open a second ChromaDB client against the same store.
-from retrieve import _collection
+from backend.retrieve import _collection
 
 # ---------------------------------------------------------------------------
 # App setup

@@ -23,10 +23,10 @@ from pptx.util import Inches
 from PIL import Image
 import chromadb
 
-from models.whisper_model import WhisperModel
-from models.blip_model import BLIPModel
-from models.ocr_model import OCRModel
-from models.embedder import Embedder
+from backend.models.whisper_model import WhisperModel
+from backend.models.blip_model import BLIPModel
+from backend.models.ocr_model import OCRModel
+from backend.models.embedder import Embedder
 
 # ---------------------------------------------------------------------------
 # Shared model instances — module-level singletons with lazy loading baked in
