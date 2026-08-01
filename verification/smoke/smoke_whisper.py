@@ -2,7 +2,7 @@ import time, os, re, difflib, whisper
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-AUDIO = os.path.join(HERE, "../../../sample_files/Natural_Language_Processing.mp3")  # <-- your recorded file (change extension if needed)
+AUDIO = os.path.join(HERE, "../../sample_files/Natural_Language_Processing.mp3")  # <-- your recorded file (change extension if needed)
 ANSWER = os.path.join(HERE, "test_smoke_answer.md")
 OUTPUT = os.path.join(HERE, "output.txt")
 SIZE  = "base"             # try "tiny" first if base is painfully slow
