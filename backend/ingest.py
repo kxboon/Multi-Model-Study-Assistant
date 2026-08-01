@@ -156,6 +156,20 @@ def _store_chunks(chunks: list, metadatas: list) -> int:
 
     embeddings = _embedder.embed(chunks)  # timed inside Embedder
 
+    # Re-ingesting a file must REPLACE its previous chunks, not append a second
+    # copy. IDs are random uuid4s, so upsert never collides and would duplicate.
+    # Delete any existing chunks for this (source_file, session_id) pair first.
+    # No-op when there's nothing to delete (first-time ingest).
+    identity = {
+        "$and": [
+            {"source_file": metadatas[0]["source_file"]},
+            {"session_id": metadatas[0]["session_id"]},
+        ]
+    }
+    t_del = time.perf_counter()
+    _collection.delete(where=identity)
+    print(f"[TIMER] ChromaDB delete (prior chunks for this file+session): {time.perf_counter() - t_del:.2f}s")
+
     ids = [str(uuid.uuid4()) for _ in chunks]
 
     t0 = time.perf_counter()
