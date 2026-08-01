@@ -18,7 +18,7 @@ load_dotenv()
 
 import chromadb
 
-from backend.models.embedder import Embedder
+from models.embedder import Embedder
 
 # ---------------------------------------------------------------------------
 # Shared singletons — lazy model loading is handled inside Embedder

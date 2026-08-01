@@ -2,9 +2,10 @@
 FastAPI application entry point for the Multimodal Study Assistant.
 
 Endpoints:
-  POST /ingest  — upload a study file and ingest it into ChromaDB
-  POST /query   — ask a question and get an LLM-grounded answer
-  GET  /health  — check server + Ollama availability
+  POST /ingest   — upload a study file and ingest it into ChromaDB
+  POST /query    — ask a question and get an LLM-grounded answer
+  GET  /sessions — list study modules present in the store, with chunk counts
+  GET  /health   — check server + Ollama availability
 """
 
 import os
@@ -19,8 +20,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from backend.ingest import ingest_file
-from backend.retrieve import query_rag, ask_ollama
+from ingest import ingest_file
+from retrieve import query_rag, ask_ollama
+# Reuse the retrieval module's existing collection handle for /sessions so we
+# don't open a second ChromaDB client against the same store.
+from retrieve import _collection
 
 # ---------------------------------------------------------------------------
 # App setup
@@ -65,6 +69,30 @@ def health_check():
         ollama_ok = False
 
     return {"status": "ok", "ollama": ollama_ok}
+
+
+@app.get("/sessions")
+def list_sessions():
+    """Return every session_id present in the collection with its chunk count.
+
+    e.g. [{"session_id": "CM3060", "chunks": 36}]
+
+    NOTE: this pulls all chunk metadata into memory to tally the counts.
+    ChromaDB has no group-by, and at project scale (hundreds of chunks) the
+    cost is negligible. It would need a real aggregate query at large scale.
+    """
+    records = _collection.get(include=["metadatas"])
+
+    counts: dict = {}
+    for meta in records["metadatas"]:
+        sid = meta.get("session_id")
+        if sid:
+            counts[sid] = counts.get(sid, 0) + 1
+
+    return [
+        {"session_id": sid, "chunks": n}
+        for sid, n in sorted(counts.items())
+    ]
 
 
 @app.post("/ingest")
@@ -112,9 +140,20 @@ def query_endpoint(req: QueryRequest):
     2. Pass retrieved chunks to Ollama as context (ask_ollama)
     3. Return the answer and the source metadata
     """
+    # query_rag treats a falsy session_id as "no filter", which would search
+    # every module at once and break isolation. Require an explicit one here
+    # rather than silently searching everything.
+    session_id = (req.session_id or "").strip()
+    if not session_id:
+        raise HTTPException(
+            status_code=400,
+            detail="session_id is required. Select a module before asking a "
+                   "question — an empty session_id would search all modules.",
+        )
+
     rag_result = query_rag(
         question=req.question,
-        session_id=req.session_id,
+        session_id=session_id,
         n_results=req.n_results,
     )
 

@@ -23,14 +23,23 @@ st.set_page_config(
 # ---------------------------------------------------------------------------
 # Session state initialisation
 # ---------------------------------------------------------------------------
+# Chat history and uploaded-file lists are keyed BY MODULE so switching modules
+# shows that module's own conversation and files. In-memory only — everything
+# here resets when the Streamlit process restarts.
 if "messages" not in st.session_state:
-    st.session_state.messages = []  # chat history: [{role, content, sources}]
+    st.session_state.messages = {}  # {module: [{role, content, sources}]}
 
 if "session_id" not in st.session_state:
-    st.session_state.session_id = "default"
+    st.session_state.session_id = None  # currently selected module
 
 if "ingested_files" not in st.session_state:
-    st.session_state.ingested_files = []  # track what has been uploaded
+    st.session_state.ingested_files = {}  # {module: [str]}
+
+if "created_modules" not in st.session_state:
+    # A module created here has no chunks until something is ingested, so it
+    # won't come back from GET /sessions yet. Remember it locally so it stays
+    # selectable in the meantime.
+    st.session_state.created_modules = []
 
 
 # ---------------------------------------------------------------------------
@@ -45,6 +54,16 @@ def check_health():
         return True, data.get("ollama", False)
     except Exception:
         return False, False
+
+
+def fetch_sessions() -> list:
+    """GET /sessions -> [{"session_id": ..., "chunks": n}]. [] if unreachable."""
+    try:
+        r = requests.get(f"{API_URL}/sessions", timeout=5)
+        r.raise_for_status()
+        return r.json()
+    except Exception:
+        return []
 
 
 def ingest_file(uploaded_file, session_id: str) -> dict:
@@ -84,53 +103,111 @@ with st.sidebar:
 
     st.divider()
 
-    # --- Session ID ---
-    st.subheader("Study Session")
-    session_id = st.text_input(
-        "Session ID",
-        value=st.session_state.session_id,
-        help="Give each study topic its own ID so queries only search that material.",
+    # --- Module switcher ---
+    st.subheader("Study Module")
+
+    server_sessions = fetch_sessions()
+    chunk_counts = {s["session_id"]: s["chunks"] for s in server_sessions}
+    # Union the server's modules with any created this run but not yet ingested.
+    modules = sorted(set(chunk_counts) | set(st.session_state.created_modules))
+
+    if modules:
+        # Keep the selection valid if the previous module vanished server-side.
+        if st.session_state.session_id not in modules:
+            st.session_state.session_id = modules[0]
+
+        selected = st.selectbox(
+            "Active module",
+            modules,
+            index=modules.index(st.session_state.session_id),
+            format_func=lambda m: f"{m}  ({chunk_counts.get(m, 0)} chunks)",
+            help="Queries and uploads apply only to the selected module.",
+        )
+        st.session_state.session_id = selected
+    else:
+        # Empty store and nothing created yet — no dropdown, just the create box.
+        st.info("No modules yet. Create one below to get started.")
+        st.session_state.session_id = None
+
+    new_module = st.text_input(
+        "New module name",
+        placeholder="e.g. CM3060",
+        help="Each module keeps its own material and its own conversation.",
     )
-    st.session_state.session_id = session_id
+    if st.button("Create Module", use_container_width=True):
+        name = new_module.strip()
+        if not name:
+            st.warning("Enter a module name first.")
+        elif name in modules:
+            st.warning(f"Module '{name}' already exists.")
+        else:
+            st.session_state.created_modules.append(name)
+            st.session_state.session_id = name
+            st.session_state.messages.setdefault(name, [])
+            st.session_state.ingested_files.setdefault(name, [])
+            st.rerun()
+
+    # The selected module scopes everything below.
+    module = st.session_state.session_id
 
     st.divider()
 
     # --- File upload ---
     st.subheader("Upload Study Material")
+
+    # A successful ingest reruns the script so the dropdown re-fetches its chunk
+    # counts, which discards the st.success() from that pass. The message is
+    # parked in session state instead and shown once here, after the rerun.
+    notice = st.session_state.pop("ingest_notice", None)
+    if notice:
+        st.success(notice)
+
     uploaded = st.file_uploader(
         "Drop a file to ingest",
         type=["pdf", "pptx", "mp3", "wav", "png", "jpg", "jpeg"],
         help="PDF, PPTX, audio, or image files are all supported.",
     )
 
-    if uploaded:
+    if uploaded and not module:
+        st.warning("Create or select a module before ingesting.")
+    elif uploaded:
         if st.button("Ingest File", type="primary", use_container_width=True):
-            with st.spinner(f"Ingesting {uploaded.name}..."):
+            ingest_ok = False
+            with st.spinner(f"Ingesting {uploaded.name} into {module}..."):
                 try:
-                    result = ingest_file(uploaded, st.session_state.session_id)
-                    st.success(
-                        f"✅ **{result['filename']}** — {result['chunks_stored']} chunks stored"
-                    )
-                    st.session_state.ingested_files.append(
+                    result = ingest_file(uploaded, module)
+                    st.session_state.ingested_files.setdefault(module, []).append(
                         f"{result['filename']} ({result['chunks_stored']} chunks)"
                     )
+                    st.session_state.ingest_notice = (
+                        f"✅ **{result['filename']}** — "
+                        f"{result['chunks_stored']} chunks stored in **{module}**"
+                    )
+                    ingest_ok = True
                 except requests.exceptions.HTTPError as e:
                     st.error(f"Ingest failed: {e.response.text}")
                 except Exception as e:
                     st.error(f"Error: {e}")
 
-    # --- Ingested files list ---
-    if st.session_state.ingested_files:
+            # Rerun OUTSIDE the try: st.rerun() works by raising, so calling it
+            # above would be caught by `except Exception` and shown as an error.
+            # The rerun re-runs fetch_sessions(), refreshing the dropdown count.
+            if ingest_ok:
+                st.rerun()
+
+    # --- Ingested files list (this module only) ---
+    module_files = st.session_state.ingested_files.get(module, []) if module else []
+    if module_files:
         st.divider()
         st.subheader("Ingested Files")
-        for f in st.session_state.ingested_files:
+        for f in module_files:
             st.markdown(f"📄 {f}")
 
     st.divider()
 
-    # --- Clear chat ---
-    if st.button("Clear Chat", use_container_width=True):
-        st.session_state.messages = []
+    # --- Clear chat (this module only) ---
+    if st.button("Clear Chat", use_container_width=True, disabled=not module):
+        st.session_state.messages[module] = []
         st.rerun()
 
 
@@ -138,10 +215,21 @@ with st.sidebar:
 # Main area — chat interface
 # ---------------------------------------------------------------------------
 st.title("💬 Ask Your Notes")
-st.caption(f"Session: **{st.session_state.session_id}** — answers are grounded only in your uploaded material.")
+
+if not module:
+    st.info("👈 Create a module in the sidebar to get started.")
+    st.stop()
+
+st.caption(
+    f"Module: **{module}** — answers are grounded only in this module's material."
+)
+
+# This module's history. setdefault returns the live list, so appends below
+# write straight back into st.session_state.messages[module].
+messages = st.session_state.messages.setdefault(module, [])
 
 # Render existing chat history
-for msg in st.session_state.messages:
+for msg in messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
@@ -159,7 +247,7 @@ for msg in st.session_state.messages:
 if question := st.chat_input("Ask a question about your notes..."):
 
     # Show the user's message immediately
-    st.session_state.messages.append({"role": "user", "content": question, "sources": []})
+    messages.append({"role": "user", "content": question, "sources": []})
     with st.chat_message("user"):
         st.markdown(question)
 
@@ -167,7 +255,7 @@ if question := st.chat_input("Ask a question about your notes..."):
     with st.chat_message("assistant"):
         with st.spinner("Thinking... (this may take 1-2 minutes on CPU)"):
             try:
-                result = query_backend(question, st.session_state.session_id)
+                result = query_backend(question, module)
                 answer = result.get("answer", "No answer returned.")
                 sources = result.get("sources", [])
 
@@ -184,25 +272,25 @@ if question := st.chat_input("Ask a question about your notes..."):
                             st.markdown(f"**{i}.** `{source_file}` ({source_type}){page_str}")
 
                 # Save to history
-                st.session_state.messages.append(
+                messages.append(
                     {"role": "assistant", "content": answer, "sources": sources}
                 )
 
             except requests.exceptions.HTTPError as e:
                 error_msg = f"❌ Query failed: {e.response.status_code} — {e.response.text}"
                 st.error(error_msg)
-                st.session_state.messages.append(
+                messages.append(
                     {"role": "assistant", "content": error_msg, "sources": []}
                 )
             except requests.exceptions.Timeout:
                 msg = "❌ Request timed out. The model is taking too long — try a shorter question."
                 st.error(msg)
-                st.session_state.messages.append(
+                messages.append(
                     {"role": "assistant", "content": msg, "sources": []}
                 )
             except Exception as e:
                 msg = f"❌ Unexpected error: {e}"
                 st.error(msg)
-                st.session_state.messages.append(
+                messages.append(
                     {"role": "assistant", "content": msg, "sources": []}
                 )
