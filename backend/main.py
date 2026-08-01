@@ -84,7 +84,10 @@ async def ingest_endpoint(
         tmp_path = tmp.name
 
     try:
-        n_chunks = ingest_file(tmp_path, metadata={"session_id": session_id})
+        n_chunks = ingest_file(
+            tmp_path,
+            metadata={"session_id": session_id, "source_file": file.filename},
+        )
     except ValueError as exc:
         raise HTTPException(status_code=415, detail=str(exc))
     except Exception as exc:

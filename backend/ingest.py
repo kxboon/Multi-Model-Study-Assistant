@@ -424,7 +424,11 @@ def ingest_file(file_path: str, metadata: dict) -> int:
     if not path.exists():
         raise FileNotFoundError(f"File not found: {file_path}")
 
-    filename = path.name
+    # Prefer a caller-supplied original filename. HTTP uploads land in a random
+    # temp file, so path.name would record e.g. "tmpqzkuxxqr.pptx" — wrong for
+    # citations, and it defeats the source_file+session_id dedup on re-upload.
+    # Direct callers that pass no source_file fall back to the real path name.
+    filename = metadata.get("source_file") or path.name
     session_id = metadata.get("session_id", "default")
     ext = path.suffix.lower()
 
