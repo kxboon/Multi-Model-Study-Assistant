@@ -95,6 +95,17 @@ ing._embedder.embed = _wrapped_embed
 ing._collection.upsert = _wrapped_upsert
 
 
+def safe_print(s: str = "") -> None:
+    """Print without crashing on a non-UTF-8 console (e.g. Windows gbk).
+
+    OCR/BLIP text can contain non-ASCII glyphs (¢, curly quotes) that the
+    active console codec can't encode; round-trip through that codec with
+    errors='replace' so the summary never raises. Harness hygiene only.
+    """
+    enc = sys.stdout.encoding or "utf-8"
+    print(s.encode(enc, errors="replace").decode(enc))
+
+
 def main() -> int:
     image = Path(IMAGE_PATH)
     print("=" * 70)
@@ -121,9 +132,9 @@ def main() -> int:
     print("=" * 70)
     print(f"  routed to _process_image : {m['routed_to_image']}")
     print(f"  ---- BLIP caption ----")
-    print(f"  {m['blip_caption']!r}")
+    safe_print(f"  {m['blip_caption']!r}")
     print(f"  ---- raw OCR output ----")
-    print(f"  {m['ocr_text']!r}")
+    safe_print(f"  {m['ocr_text']!r}")
     print(f"  ------------------------")
     print(f"  chunk count              : {m['chunk_count']}")
     print(f"  embed time               : {m['embed_time_s']} s")
