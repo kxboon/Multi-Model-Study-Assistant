@@ -32,7 +32,7 @@ class SentimentModel:
                 model=self.MODEL_ID,
                 model_kwargs={"cache_dir": self._cache_dir},
                 # device=-1 forces CPU; 0 would use the first CUDA GPU
-                device=0,
+                device=-1,
             )
 
     def predict(self, text: str) -> dict:
