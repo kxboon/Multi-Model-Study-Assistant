@@ -2,6 +2,12 @@
 Unit tests for the SentimentModel wrapper.
 
 Mocks the HuggingFace pipeline so no model weights are downloaded.
+
+The fake return values use the label vocabulary the configured model actually
+emits — lowercase "negative" / "neutral" / "positive" from
+cardiffnlp/twitter-roberta-base-sentiment-latest. The earlier uppercase
+"POSITIVE" / "NEGATIVE" came from the binary SST-2 model and are no longer
+values this wrapper can produce.
 """
 
 from unittest.mock import MagicMock, patch
@@ -12,7 +18,7 @@ def test_predict_returns_label_and_score():
     with patch("backend.models.sentiment_model.pipeline") as mock_pipeline_fn:
         fake_pipe = MagicMock()
         # HuggingFace pipelines return a list of result dicts
-        fake_pipe.return_value = [{"label": "POSITIVE", "score": 0.98}]
+        fake_pipe.return_value = [{"label": "positive", "score": 0.98}]
         mock_pipeline_fn.return_value = fake_pipe
 
         from backend.models.sentiment_model import SentimentModel
@@ -20,16 +26,16 @@ def test_predict_returns_label_and_score():
         model = SentimentModel()
         result = model.predict("I love studying machine learning!")
 
-        assert result["label"] == "POSITIVE"
+        assert result["label"] == "positive"
         assert isinstance(result["score"], float)
         assert 0.0 <= result["score"] <= 1.0
 
 
 def test_predict_negative_sentiment():
-    """SentimentModel.predict() should correctly identify NEGATIVE sentiment."""
+    """SentimentModel.predict() should pass through a negative label."""
     with patch("backend.models.sentiment_model.pipeline") as mock_pipeline_fn:
         fake_pipe = MagicMock()
-        fake_pipe.return_value = [{"label": "NEGATIVE", "score": 0.91}]
+        fake_pipe.return_value = [{"label": "negative", "score": 0.91}]
         mock_pipeline_fn.return_value = fake_pipe
 
         from backend.models.sentiment_model import SentimentModel
@@ -37,7 +43,7 @@ def test_predict_negative_sentiment():
         model = SentimentModel()
         result = model.predict("This exam was really difficult and stressful.")
 
-        assert result["label"] == "NEGATIVE"
+        assert result["label"] == "negative"
 
 
 def test_lazy_load_not_called_on_init():

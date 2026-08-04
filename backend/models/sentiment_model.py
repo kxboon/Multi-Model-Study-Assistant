@@ -1,10 +1,20 @@
 """
 Sentiment analysis wrapper using HuggingFace Transformers pipeline.
-Uses distilbert-base-uncased-finetuned-sst-2-english by default —
-a lightweight model that runs well on CPU.
 
-In the study assistant context, sentiment can flag emotionally charged
-passages in lecture notes (e.g. strong warnings, key insights).
+Uses cardiffnlp/twitter-roberta-base-sentiment-latest, which returns three
+labels — negative / neutral / positive.
+
+The three-way split matters here. The previous model
+(distilbert-base-uncased-finetuned-sst-2-english) was binary, so it had
+nowhere to put affectless text: plain factual questions like "what is
+lemmatization" came back NEGATIVE at >0.99, indistinguishable from genuine
+frustration. With a neutral class those questions land on neutral instead,
+so a negative label actually means something.
+
+In the study assistant context, sentiment flags how a student sounds when
+asking a question, which is logged as a learning signal (see backend/signals.py).
+
+NOTE: this model's labels are lowercase ("negative", not "NEGATIVE").
 """
 
 import os
@@ -18,7 +28,7 @@ class SentimentModel:
     to ./models_cache/ to avoid repeated downloads across sessions.
     """
 
-    MODEL_ID = "distilbert-base-uncased-finetuned-sst-2-english"
+    MODEL_ID = "cardiffnlp/twitter-roberta-base-sentiment-latest"
 
     def __init__(self):
         self._pipe = None
@@ -42,7 +52,7 @@ class SentimentModel:
             text: The input string (truncated internally to 512 tokens).
 
         Returns:
-            {"label": "POSITIVE" | "NEGATIVE", "score": float}
+            {"label": "negative" | "neutral" | "positive", "score": float}
         """
         self._load()
 
