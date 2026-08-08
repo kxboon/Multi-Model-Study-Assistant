@@ -1,7 +1,7 @@
 """
 Streamlit frontend for the Multimodal Study Assistant.
 
-Talks to the FastAPI backend at localhost:8000.
+Talks to the FastAPI backend at 127.0.0.1:8000.
 Run with: streamlit run frontend/app.py
 """
 
@@ -9,7 +9,10 @@ import streamlit as st
 import requests
 import time
 
-API_URL = "http://localhost:8000"
+# 127.0.0.1, not localhost: "localhost" resolves to ::1 first on this machine,
+# and uvicorn binds IPv4 only, so every call waits ~2s for the IPv6 attempt to
+# fail before falling back. That cost was paid on every rerun.
+API_URL = "http://127.0.0.1:8000"
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -46,13 +49,30 @@ if "quiz" not in st.session_state:
     # {module: {"topic": str, "items": [...], "meta": {...}, "results": [...]}}
     st.session_state.quiz = {}
 
+if "flashcards" not in st.session_state:
+    # Keyed by module for the same reason as quiz. In-memory only — a deck
+    # lasts as long as the session. Spaced repetition is out of scope: nothing
+    # here schedules cards or survives a new deck.
+    # {module: {"topic", "cards", "nonce", "index", "revealed", "ratings"}}
+    st.session_state.flashcards = {}
+
 
 # ---------------------------------------------------------------------------
 # Helper — call backend
 # ---------------------------------------------------------------------------
 
+# Both helpers below run on EVERY rerun — including each flashcard reveal and
+# rating click — and each is an HTTP round trip. Uncached they dominated the
+# cost of an interaction, so both are cached with a short TTL.
+
+@st.cache_data(ttl=15, show_spinner=False)
 def check_health():
-    """Return (status_ok, ollama_ok) booleans."""
+    """Return (status_ok, ollama_ok) booleans.
+
+    TTL is deliberately the shorter of the two: this drives a live status
+    indicator, so a stale "Ollama ready" after Ollama has died is actively
+    misleading. 15s bounds how long the display can lie.
+    """
     try:
         r = requests.get(f"{API_URL}/health", timeout=3)
         data = r.json()
@@ -61,8 +81,14 @@ def check_health():
         return False, False
 
 
+@st.cache_data(ttl=30, show_spinner=False)
 def fetch_sessions() -> list:
-    """GET /sessions -> [{"session_id": ..., "chunks": n}]. [] if unreachable."""
+    """GET /sessions -> [{"session_id": ..., "chunks": n}]. [] if unreachable.
+
+    Longer TTL than check_health: the only change this app makes to the session
+    list is an ingest, and that path clears this cache explicitly. The TTL is
+    just a backstop for changes made outside this session.
+    """
     try:
         r = requests.get(f"{API_URL}/sessions", timeout=5)
         r.raise_for_status()
@@ -119,6 +145,37 @@ def post_quiz_signals(session_id: str, topic: str, results: list) -> dict:
         ],
     }
     resp = requests.post(f"{API_URL}/quiz/signals", json=payload, timeout=60)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def generate_flashcards(topic: str, session_id: str, n_cards: int) -> dict:
+    """POST to /flashcards and return the generated deck plus its metadata."""
+    payload = {"topic": topic, "session_id": session_id, "n_cards": n_cards}
+    r = requests.post(f"{API_URL}/flashcards", json=payload, timeout=900)
+    r.raise_for_status()
+    return r.json()
+
+
+def post_flashcard_signals(session_id: str, topic: str, results: list) -> dict:
+    """POST self-rated cards to /flashcards/signals.
+
+    Callers must treat a failure as non-fatal — the student has already seen
+    the card, and a logging problem must not block moving to the next one.
+    """
+    payload = {
+        "session_id": session_id,
+        "topic": topic,
+        "results": [
+            {
+                "term": r["term"],
+                "known": r["known"],
+                "source_file": r.get("source_file"),
+            }
+            for r in results
+        ],
+    }
+    resp = requests.post(f"{API_URL}/flashcards/signals", json=payload, timeout=60)
     resp.raise_for_status()
     return resp.json()
 
@@ -233,6 +290,12 @@ with st.sidebar:
             # above would be caught by `except Exception` and shown as an error.
             # The rerun re-runs fetch_sessions(), refreshing the dropdown count.
             if ingest_ok:
+                # MUST clear first. The ingest just changed the chunk counts, but
+                # fetch_sessions() is cached — without this the rerun would be
+                # served the pre-ingest counts and the dropdown would show a
+                # stale number until the TTL expired, reintroducing exactly the
+                # bug the rerun above was added to fix.
+                fetch_sessions.clear()
                 st.rerun()
 
     # --- Ingested files list (this module only) ---
@@ -264,7 +327,7 @@ st.caption(
     f"Module: **{module}** — answers are grounded only in this module's material."
 )
 
-tab_chat, tab_quiz = st.tabs(["💬 Chat", "📝 Quiz"])
+tab_chat, tab_quiz, tab_cards = st.tabs(["💬 Chat", "📝 Quiz", "🗂️ Flashcards"])
 
 # ---------------------------------------------------------------------------
 # Chat tab — behaviour unchanged, only relocated inside the tab
@@ -422,27 +485,85 @@ with tab_quiz:
                 for w in quiz["warnings"]:
                     st.markdown(f"- {w}")
 
-        if results is None:
-            # --- Answering ---
-            with st.form(f"quiz_answers_{quiz['nonce']}"):
-                for i, item in enumerate(items):
-                    st.markdown(f"**Q{i + 1}. {item['question']}**")
-                    st.radio(
-                        "Choose one",
-                        options=list(range(len(item["options"]))),
-                        format_func=lambda k, it=item: it["options"][k],
-                        key=f"quiz_{module}_{quiz['nonce']}_{i}",
-                        index=None,
-                        label_visibility="collapsed",
-                    )
-                    st.divider()
-                submitted = st.form_submit_button(
-                    "Submit Quiz", type="primary", use_container_width=True
-                )
+        # Submitting and starting a new quiz redraw this slot in place rather
+        # than calling st.rerun(). An explicit rerun re-creates the tab strip,
+        # losing the client-side "which tab is open" state and dropping the
+        # user back on Chat — mid-quiz, that means never seeing your score.
+        quiz_slot = st.empty()
 
-            if submitted:
+        def draw_form() -> bool:
+            """Draw the answer form into the slot. Returns True if submitted."""
+            with quiz_slot.container():
+                with st.form(f"quiz_answers_{quiz['nonce']}"):
+                    for i, item in enumerate(items):
+                        st.markdown(f"**Q{i + 1}. {item['question']}**")
+                        st.radio(
+                            "Choose one",
+                            options=list(range(len(item["options"]))),
+                            format_func=lambda k, it=item: it["options"][k],
+                            key=f"quiz_{module}_{quiz['nonce']}_{i}",
+                            index=None,
+                            label_visibility="collapsed",
+                        )
+                        st.divider()
+                    return st.form_submit_button(
+                        "Submit Quiz", type="primary", use_container_width=True
+                    )
+
+        def draw_results() -> bool:
+            """Draw the marked results into the slot.
+
+            Returns True if "New Quiz" was clicked. The reset itself happens in
+            the caller: clearing the slot from inside its own container would
+            destroy the container mid-write and corrupt the element tree.
+            """
+            results = quiz["results"]
+            score = sum(1 for r in results if r["correct"])
+            with quiz_slot.container():
+                st.subheader(f"Score: {score} / {len(results)}")
+                st.progress(score / len(results) if results else 0.0)
+                st.divider()
+
+                for i, (item, result) in enumerate(zip(items, results), 1):
+                    icon = "✅" if result["correct"] else "❌"
+                    st.markdown(f"{icon} **Q{i}. {item['question']}**")
+
+                    selected = result["selected_index"]
+                    your_answer = (
+                        item["options"][selected] if selected is not None
+                        else "_(not answered)_"
+                    )
+                    st.markdown(f"- Your answer: {your_answer}")
+                    st.markdown(
+                        f"- Correct answer: **{item['options'][item['correct_index']]}**"
+                    )
+
+                    # Provenance: the chunk this question was drawn from.
+                    chunk_text = item.get("source_chunk_text")
+                    if chunk_text:
+                        label = item.get("source_file") or "source"
+                        page = item.get("page_or_slide")
+                        if page:
+                            label += f" — page/slide {page}"
+                        with st.expander(f"📎 From {label}"):
+                            st.markdown(chunk_text)
+                    else:
+                        st.caption("No source chunk recorded for this question.")
+                    st.divider()
+
+                return st.button("New Quiz", use_container_width=True,
+                                 key=f"quiz_new_{module}_{quiz['nonce']}")
+
+        def reset_quiz():
+            st.session_state.quiz.pop(module, None)
+            quiz_slot.empty()
+            st.info("Quiz cleared — generate a new one above.")
+
+        if results is None:
+            if draw_form():
                 # Marked in Python by comparing indices — the LLM is never
-                # asked whether an answer is right.
+                # asked whether an answer is right. The radio values survive in
+                # session_state after the form is replaced below.
                 marked = []
                 for i, item in enumerate(items):
                     selected = st.session_state.get(
@@ -464,44 +585,209 @@ with tab_quiz:
                 except Exception as e:
                     st.warning(f"Score recorded locally, but signal logging failed: {e}")
 
-                # Outside the try — st.rerun() works by raising, so an except
-                # above would swallow it. Needed to swap the form for results.
-                st.rerun()
-
+                # Swap the form for the results in the same run, so the open
+                # tab stays put.
+                if draw_results():
+                    reset_quiz()
         else:
-            # --- Marked results ---
-            score = sum(1 for r in results if r["correct"])
-            st.subheader(f"Score: {score} / {len(results)}")
-            st.progress(score / len(results) if results else 0.0)
-            st.divider()
+            if draw_results():
+                reset_quiz()
 
-            for i, (item, result) in enumerate(zip(items, results), 1):
-                icon = "✅" if result["correct"] else "❌"
-                st.markdown(f"{icon} **Q{i}. {item['question']}**")
 
-                selected = result["selected_index"]
-                your_answer = (
-                    item["options"][selected] if selected is not None
-                    else "_(not answered)_"
-                )
-                st.markdown(f"- Your answer: {your_answer}")
-                st.markdown(
-                    f"- Correct answer: **{item['options'][item['correct_index']]}**"
-                )
+# ---------------------------------------------------------------------------
+# Flashcards tab — term on the front, definition on the back, one at a time
+# ---------------------------------------------------------------------------
+with tab_cards:
+    deck = st.session_state.flashcards.get(module)
 
-                # Provenance: the chunk this question was drawn from.
-                chunk_text = item.get("source_chunk_text")
+    # --- Config form ---
+    with st.form("flashcard_config"):
+        card_topic_input = st.text_input(
+            "Topic",
+            value=(deck or {}).get("topic", ""),
+            placeholder="e.g. NLP terminology",
+            help="Cards are retrieved and written about this topic.",
+            key="flashcard_topic_input",
+        )
+        n_cards = st.radio(
+            "Number of cards", [5, 10, 20], index=1, horizontal=True
+        )
+        generate_deck = st.form_submit_button(
+            "Generate Flashcards", type="primary", use_container_width=True
+        )
+
+    if generate_deck:
+        card_topic = card_topic_input.strip()
+        if not card_topic:
+            st.warning("Enter a topic first.")
+        else:
+            with st.spinner(
+                f"Generating {n_cards} cards on '{card_topic}'... "
+                "(this may take a few minutes on CPU)"
+            ):
+                try:
+                    data = generate_flashcards(card_topic, module, n_cards)
+                    st.session_state.flashcards[module] = {
+                        "topic": card_topic,
+                        "cards": data.get("cards", []),
+                        "requested": data.get("requested"),
+                        "parsed": data.get("parsed"),
+                        "generation_time_s": data.get("generation_time_s"),
+                        "warnings": data.get("warnings", []),
+                        # Namespaces this deck's widget keys so a previous
+                        # deck's reveal state cannot bleed into it.
+                        "nonce": str(time.time()),
+                        "index": 0,
+                        "revealed": False,
+                        "ratings": [],
+                    }
+                    deck = st.session_state.flashcards[module]
+                except requests.exceptions.HTTPError as e:
+                    st.error(
+                        f"Flashcard generation failed: {e.response.status_code} "
+                        f"— {e.response.text}"
+                    )
+                except requests.exceptions.Timeout:
+                    st.error("Flashcard generation timed out — try fewer cards.")
+                except Exception as e:
+                    st.error(f"Error: {e}")
+
+    # --- Deck ---
+    if deck is not None and not deck.get("cards"):
+        st.error(
+            "No cards could be parsed from the model's output. "
+            "Try a different topic, or fewer cards."
+        )
+        if deck.get("warnings"):
+            with st.expander("Parser notes"):
+                for w in deck["warnings"]:
+                    st.markdown(f"- {w}")
+
+    elif deck:
+        cards = deck["cards"]
+        total = len(cards)
+        idx = deck["index"]
+
+        if deck.get("parsed") != deck.get("requested"):
+            st.warning(
+                f"Generated {deck['parsed']} of {deck['requested']} requested "
+                "cards — the rest could not be parsed."
+            )
+        if deck.get("warnings"):
+            with st.expander("Parser notes"):
+                for w in deck["warnings"]:
+                    st.markdown(f"- {w}")
+
+        # Reveals and ratings redraw these slots in place instead of calling
+        # st.rerun(). An explicit rerun re-creates the tab strip, which loses
+        # the client-side "which tab is open" state and drops the user back on
+        # Chat — so going through a deck kicked you out on every click.
+        card_slot = st.empty()
+        summary_slot = st.empty()
+
+        def draw_card(i: int, revealed: bool):
+            """Draw card i into card_slot. Returns (reveal, got_it, missed)."""
+            card = cards[i]
+            with card_slot.container():
+                st.caption(f"Card {i + 1} of {total}")
+                st.progress(i / total)
+                st.markdown(f"### {card['term']}")
+
+                if not revealed:
+                    clicked = st.button(
+                        "Reveal", type="primary", use_container_width=True,
+                        key=f"fc_reveal_{module}_{deck['nonce']}_{i}",
+                    )
+                    return clicked, False, False
+
+                st.success(card["definition"])
+
+                chunk_text = card.get("source_chunk_text")
                 if chunk_text:
-                    label = item.get("source_file") or "source"
-                    page = item.get("page_or_slide")
+                    label = card.get("source_file") or "source"
+                    page = card.get("page_or_slide")
                     if page:
                         label += f" — page/slide {page}"
                     with st.expander(f"📎 From {label}"):
                         st.markdown(chunk_text)
                 else:
-                    st.caption("No source chunk recorded for this question.")
-                st.divider()
+                    st.caption("No source chunk recorded for this card.")
 
-            if st.button("New Quiz", use_container_width=True):
-                st.session_state.quiz.pop(module, None)
-                st.rerun()
+                st.divider()
+                st.caption("How well did you know this?")
+                col_known, col_unknown = st.columns(2)
+                return (
+                    False,
+                    col_known.button(
+                        "✅ Got it", use_container_width=True,
+                        key=f"fc_known_{module}_{deck['nonce']}_{i}",
+                    ),
+                    col_unknown.button(
+                        "❌ Didn't know", use_container_width=True,
+                        key=f"fc_unknown_{module}_{deck['nonce']}_{i}",
+                    ),
+                )
+
+        def draw_summary() -> bool:
+            """Draw the end-of-deck summary. Returns True if "New Deck" was
+            clicked; the reset happens in the caller, because clearing the slot
+            from inside its own container corrupts the element tree."""
+            ratings = deck["ratings"]
+            known = sum(1 for r in ratings if r["known"])
+            unknown = len(ratings) - known
+            with summary_slot.container():
+                st.subheader(f"Deck complete — {known} known, {unknown} unknown")
+                st.progress(1.0)
+                col_a, col_b = st.columns(2)
+                col_a.metric("✅ Got it", known)
+                col_b.metric("❌ Didn't know", unknown)
+                st.divider()
+                for i, rating in enumerate(ratings, 1):
+                    icon = "✅" if rating["known"] else "❌"
+                    st.markdown(f"{icon} **{i}. {rating['term']}**")
+                st.divider()
+                return st.button("New Deck", use_container_width=True,
+                                 key=f"fc_new_{module}_{deck['nonce']}")
+
+        def reset_deck():
+            st.session_state.flashcards.pop(module, None)
+            summary_slot.empty()
+            st.info("Deck cleared — generate a new one above.")
+
+        if idx < total:
+            reveal, got_it, missed = draw_card(idx, deck["revealed"])
+
+            if reveal:
+                deck["revealed"] = True
+                # Redraw the same card, now showing its back. Same run, so the
+                # tab the user is looking at stays put.
+                draw_card(idx, True)
+
+            elif got_it or missed:
+                rating = {
+                    "term": cards[idx]["term"],
+                    "known": bool(got_it),
+                    "source_file": cards[idx].get("source_file"),
+                }
+                deck["ratings"].append(rating)
+                deck["index"] = idx + 1
+                deck["revealed"] = False
+
+                # Best-effort: the rating is already recorded locally, so a
+                # logging failure must not stop the student moving on.
+                try:
+                    post_flashcard_signals(module, deck["topic"], [rating])
+                except Exception as e:
+                    st.warning(
+                        f"Rating kept locally, but signal logging failed: {e}"
+                    )
+
+                if deck["index"] < total:
+                    draw_card(deck["index"], False)
+                else:
+                    card_slot.empty()
+                    if draw_summary():
+                        reset_deck()
+        else:
+            if draw_summary():
+                reset_deck()

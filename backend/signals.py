@@ -35,6 +35,9 @@ extras:
 - "quiz" records carry `quiz_topic`, the subject the questions were generated
   from. It is deliberately NOT stored in `topic`, so that `topic` stays
   comparable with the sentiment records.
+- "flashcard" records carry `flashcard_topic`, the subject the deck was
+  generated from, for the same reason. Their `question` field holds the card's
+  term — the slot that names whatever was being assessed.
 """
 
 import json

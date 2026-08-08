@@ -6,6 +6,8 @@ Endpoints:
   POST /query         — ask a question and get an LLM-grounded answer
   POST /quiz          — generate an MCQ quiz from a module's material
   POST /quiz/signals  — record per-question quiz outcomes as learning signals
+  POST /flashcards    — generate a term/definition flashcard deck
+  POST /flashcards/signals — record per-card self-ratings as learning signals
   GET  /sessions      — list study modules present in the store, with chunk counts
   GET  /health        — check server + Ollama availability
 """
@@ -86,6 +88,25 @@ class QuizSignalsRequest(BaseModel):
     results: list[QuizResultItem] = []
 
 
+class FlashcardRequest(BaseModel):
+    session_id: str = None
+    topic: str = ""
+    n_cards: int = 10
+
+
+class FlashcardResultItem(BaseModel):
+    """One card as self-rated by the student."""
+    term: str
+    known: bool
+    source_file: str = None
+
+
+class FlashcardSignalsRequest(BaseModel):
+    session_id: str = None
+    topic: str = ""
+    results: list[FlashcardResultItem] = []
+
+
 # ---------------------------------------------------------------------------
 # Quiz generation helpers
 # ---------------------------------------------------------------------------
@@ -149,6 +170,41 @@ def _build_quiz_prompt(topic: str, chunks: list, n_questions: int) -> str:
     )
 
 
+def _build_flashcard_prompt(topic: str, chunks: list, n_cards: int) -> str:
+    """Build the structured flashcard prompt, with the source chunks numbered.
+
+    Fronts are terms, not questions — that keeps flashcards distinct from the
+    quiz, which is the feature that asks questions.
+    """
+    numbered = "\n\n".join(
+        f"[CHUNK {i}]\n{text}" for i, text in enumerate(chunks)
+    )
+
+    return (
+        "You are making revision flashcards from a student's own lecture "
+        "notes. Use ONLY the numbered notes below. Do not invent anything "
+        "that is not stated in them.\n\n"
+        f"{numbered}\n\n"
+        f'Make exactly {n_cards} flashcards about "{topic}".\n\n'
+        "Each card has a TERM on the front and its DEFINITION on the back.\n"
+        "The term must be a concept, term, or name — a short noun phrase. It "
+        "must NOT be a question: do not start it with what, why, how, when, "
+        "which, or who, and do not end it with a question mark.\n\n"
+        "Return ONLY a JSON array. No prose before or after it, no markdown "
+        "code fences. Each element must be an object with exactly these keys:\n"
+        '  "term": string, the front of the card\n'
+        '  "definition": string, the back of the card\n'
+        '  "source_chunk_index": integer, the [CHUNK n] the card came from\n\n'
+        "Required shape:\n"
+        '[{"term": "Tokenization", "definition": "Breaking a string of text '
+        'into individual chunks called tokens.", "source_chunk_index": 0}]\n\n'
+        "Rules:\n"
+        "- the term is a noun phrase, never a question\n"
+        "- the definition is one or two sentences, drawn from the notes\n"
+        "- do not repeat a term\n"
+    )
+
+
 def _loads_lenient(text: str):
     """json.loads, retried once with trailing commas stripped."""
     try:
@@ -163,7 +219,20 @@ def _loads_lenient(text: str):
         return None
 
 
-def _validate_item(obj, n_chunks: int):
+def _coerce_source_index(obj, n_chunks: int):
+    """Read source_chunk_index, or None if absent/unusable.
+
+    Provenance is nice-to-have, not load-bearing: a bad or missing chunk index
+    degrades to "no source shown" rather than dropping the whole item.
+    """
+    try:
+        source_index = int(obj.get("source_chunk_index"))
+    except (TypeError, ValueError):
+        return None
+    return source_index if 0 <= source_index < n_chunks else None
+
+
+def _validate_quiz_item(obj, n_chunks: int):
     """Coerce one raw object into a quiz item, or return (None, reason)."""
     if not isinstance(obj, dict):
         return None, "not a JSON object"
@@ -185,32 +254,55 @@ def _validate_item(obj, n_chunks: int):
     if not 0 <= correct_index <= 3:
         return None, f"'correct_index' out of range: {correct_index}"
 
-    # Provenance is nice-to-have, not load-bearing: a bad or missing chunk
-    # index degrades to "no source shown" rather than dropping the question.
-    try:
-        source_index = int(obj.get("source_chunk_index"))
-    except (TypeError, ValueError):
-        source_index = None
-    if source_index is None or not 0 <= source_index < n_chunks:
-        source_index = None
-
     return {
         "question": question.strip(),
         "options": options,
         "correct_index": correct_index,
-        "source_chunk_index": source_index,
+        "source_chunk_index": _coerce_source_index(obj, n_chunks),
     }, None
 
 
-def _parse_quiz_items(raw: str, n_chunks: int):
-    """Parse the model's output into quiz items as leniently as possible.
+def _validate_flashcard(obj, n_chunks: int):
+    """Coerce one raw object into a flashcard, or return (None, reason).
+
+    A card is a term on the front and its definition on the back — deliberately
+    not a question, which is the quiz's job.
+    """
+    if not isinstance(obj, dict):
+        return None, "not a JSON object"
+
+    term = obj.get("term")
+    if not isinstance(term, str) or not term.strip():
+        return None, "missing or empty 'term'"
+
+    definition = obj.get("definition")
+    if not isinstance(definition, str) or not definition.strip():
+        return None, "missing or empty 'definition'"
+
+    return {
+        "term": term.strip(),
+        "definition": definition.strip(),
+        "source_chunk_index": _coerce_source_index(obj, n_chunks),
+    }, None
+
+
+def _parse_items(raw: str, validate):
+    """Parse a JSON array out of the model's output as leniently as possible.
 
     Handles, in order: markdown fences, prose preamble/postamble around the
     array, trailing commas, and — if the array as a whole cannot be parsed —
-    salvaging individual objects so a single malformed item does not lose the
-    rest of the quiz.
+    salvaging individual objects so one malformed entry does not lose the rest.
 
-    Returns (items, warnings).
+    The recovery is format-agnostic; `validate` decides what a valid item looks
+    like, so quizzes and flashcards share this without duplicating it.
+
+    Args:
+        raw:      The model's unedited completion.
+        validate: Callable taking one decoded object and returning
+                  (item, None) on success or (None, reason) on rejection.
+
+    Returns:
+        (items, warnings)
     """
     warnings = []
     text = raw.strip()
@@ -224,39 +316,62 @@ def _parse_quiz_items(raw: str, n_chunks: int):
 
     # 2. Trim prose either side of the outermost array.
     start, end = text.find("["), text.rfind("]")
-    if start == -1 or end == -1 or end <= start:
-        warnings.append("no JSON array found in model output")
-        candidates = []
-    else:
+
+    complete_array = start != -1 and end > start
+    if complete_array:
         if start > 0 or end < len(text.strip()) - 1:
             warnings.append("prose around the JSON array was stripped")
         array_text = text[start:end + 1]
-
         parsed = _loads_lenient(array_text)
-        if isinstance(parsed, list):
-            candidates = parsed
-        else:
-            # 3. Array-level parse failed — salvage whatever objects we can.
-            warnings.append(
-                "array did not parse; recovered individual objects instead"
+    else:
+        # No closing bracket: the model was cut off mid-array, or never opened
+        # one. Any objects written before the cut are still perfectly good, so
+        # fall through to salvage rather than discarding the whole response.
+        array_text = text[start:] if start != -1 else text
+        parsed = None
+
+    if isinstance(parsed, list):
+        candidates = parsed
+    else:
+        # 3. Array-level parse failed or was impossible — salvage whatever
+        #    complete objects we can. An object truncated mid-write simply does
+        #    not match the regex, so it is dropped while its siblings survive.
+        warnings.append(
+            "array did not parse; recovered individual objects instead"
+            if complete_array else
+            "no complete JSON array (unterminated or absent); "
+            "recovered individual objects instead"
+        )
+        candidates = [
+            obj for obj in (
+                _loads_lenient(m.group(0))
+                for m in re.finditer(r"\{[^{}]*\}", array_text, re.DOTALL)
             )
-            candidates = [
-                obj for obj in (
-                    _loads_lenient(m.group(0))
-                    for m in re.finditer(r"\{[^{}]*\}", array_text, re.DOTALL)
-                )
-                if obj is not None
-            ]
+            if obj is not None
+        ]
 
     items = []
     for i, obj in enumerate(candidates):
-        item, reason = _validate_item(obj, n_chunks)
+        item, reason = validate(obj)
         if item is None:
             warnings.append(f"item {i} rejected: {reason}")
         else:
             items.append(item)
 
     return items, warnings
+
+
+def _attach_provenance(items: list, chunks: list, metadatas: list) -> None:
+    """Attach each item's source chunk text and metadata, in place.
+
+    Shared by /quiz and /flashcards so both show provenance the same way.
+    """
+    for item in items:
+        idx = item["source_chunk_index"]
+        meta = metadatas[idx] if idx is not None else {}
+        item["source_chunk_text"] = chunks[idx] if idx is not None else None
+        item["source_file"] = meta.get("source_file")
+        item["page_or_slide"] = meta.get("page_or_slide")
 
 
 # ---------------------------------------------------------------------------
@@ -484,18 +599,15 @@ def quiz_endpoint(req: QuizRequest):
           f"[QUIZ RAW] ---- end model output ----")
 
     t_parse = time.perf_counter()
-    items, warnings = _parse_quiz_items(raw, len(chunks))
+    items, warnings = _parse_items(
+        raw, lambda obj: _validate_quiz_item(obj, len(chunks))
+    )
     parse_elapsed = time.perf_counter() - t_parse
     print(f"[TIMER] Quiz parsing: {parse_elapsed:.4f}s")
 
     # Attach provenance: the chunk each question was drawn from, plus where
     # that chunk originally came from, so the frontend can show it on marking.
-    for item in items:
-        idx = item["source_chunk_index"]
-        meta = metadatas[idx] if idx is not None else {}
-        item["source_chunk_text"] = chunks[idx] if idx is not None else None
-        item["source_file"] = meta.get("source_file")
-        item["page_or_slide"] = meta.get("page_or_slide")
+    _attach_provenance(items, chunks, metadatas)
 
     print(f"[QUIZ] requested={n_questions} parsed={len(items)} "
           f"warnings={len(warnings)}")
@@ -562,5 +674,134 @@ def quiz_signals_endpoint(req: QuizSignalsRequest):
                   f"({type(exc).__name__}: {exc}) — continuing.")
 
     print(f"[SIGNAL] quiz: {logged} logged, {failed} failed "
+          f"for session '{session_id}'")
+    return {"logged": logged, "failed": failed}
+
+
+@app.post("/flashcards")
+def flashcards_endpoint(req: FlashcardRequest):
+    """Generate a flashcard deck from one module's material.
+
+    Same shape as /quiz — retrieve, prompt, parse leniently, attach provenance
+    — but each card is a term and its definition rather than a question.
+    """
+    # Same guard as /quiz: a blank session_id would draw on every module.
+    session_id = (req.session_id or "").strip()
+    if not session_id:
+        raise HTTPException(
+            status_code=400,
+            detail="session_id is required. Select a module before generating "
+                   "flashcards — an empty session_id would search all modules.",
+        )
+
+    topic = (req.topic or "").strip()
+    if not topic:
+        raise HTTPException(
+            status_code=400,
+            detail="topic is required — it is what the cards are retrieved "
+                   "and written about.",
+        )
+
+    n_cards = max(1, min(int(req.n_cards or 10), 30))
+
+    rag_result = query_rag(
+        question=topic,
+        session_id=session_id,
+        n_results=max(5, n_cards),
+    )
+
+    chunks = rag_result["chunks"]
+    metadatas = rag_result["metadatas"]
+
+    if not chunks:
+        raise HTTPException(
+            status_code=404,
+            detail="No study material found for this module. Ingest some files first.",
+        )
+
+    prompt = _build_flashcard_prompt(topic, chunks, n_cards)
+
+    t_gen = time.perf_counter()
+    try:
+        raw = _ollama_generate(prompt)
+    except requests.exceptions.ConnectionError:
+        raise HTTPException(
+            status_code=503,
+            detail="Ollama is not running. Start it with: ollama serve",
+        )
+    gen_elapsed = time.perf_counter() - t_gen
+    print(f"[TIMER] Flashcard generation (Ollama): {gen_elapsed:.2f}s "
+          f"({len(raw)} chars)")
+    print(f"[FLASHCARD RAW] ---- begin model output ----\n{raw}\n"
+          f"[FLASHCARD RAW] ---- end model output ----")
+
+    t_parse = time.perf_counter()
+    cards, warnings = _parse_items(
+        raw, lambda obj: _validate_flashcard(obj, len(chunks))
+    )
+    parse_elapsed = time.perf_counter() - t_parse
+    print(f"[TIMER] Flashcard parsing: {parse_elapsed:.4f}s")
+
+    _attach_provenance(cards, chunks, metadatas)
+
+    print(f"[FLASHCARDS] requested={n_cards} parsed={len(cards)} "
+          f"warnings={len(warnings)}")
+
+    return {
+        "session_id": session_id,
+        "topic": topic,
+        "requested": n_cards,
+        "parsed": len(cards),
+        "chunks_used": len(chunks),
+        "generation_time_s": round(gen_elapsed, 2),
+        "parse_time_s": round(parse_elapsed, 4),
+        "warnings": warnings,
+        "cards": cards,
+    }
+
+
+@app.post("/flashcards/signals")
+def flashcard_signals_endpoint(req: FlashcardSignalsRequest):
+    """Record one learning signal per self-rated flashcard.
+
+    Mirrors /quiz/signals: the frontend decides known/unknown (here the student
+    does, by pressing a button) and this endpoint only records the outcome.
+    """
+    session_id = (req.session_id or "").strip()
+    if not session_id:
+        raise HTTPException(
+            status_code=400,
+            detail="session_id is required to record flashcard signals.",
+        )
+
+    # Best-effort, exactly like the quiz and sentiment signals: the student has
+    # already seen the card by the time this runs, so a logging failure must
+    # never surface as an error or block moving to the next card.
+    logged, failed = 0, 0
+    for result in req.results:
+        try:
+            log_signal({
+                "session_id": session_id,
+                # topic mirrors session_id, the same invariant every signal
+                # type holds to so they stay aggregatable — see the schema
+                # docstring in signals.py. The deck's subject goes in
+                # flashcard_topic, matching how quiz_topic is handled.
+                "topic": session_id,
+                "signal_type": "flashcard",
+                "value": "known" if result.known else "unknown",
+                "score": 1.0 if result.known else 0.0,
+                # The card's front stands in for "what was being assessed",
+                # the same slot the question fills for quiz and sentiment.
+                "question": result.term,
+                "retrieved_sources": [result.source_file] if result.source_file else [],
+                "flashcard_topic": (req.topic or "").strip() or None,
+            })
+            logged += 1
+        except Exception as exc:  # noqa: BLE001 — logging must never block the deck
+            failed += 1
+            print(f"[WARN] Flashcard signal logging failed "
+                  f"({type(exc).__name__}: {exc}) — continuing.")
+
+    print(f"[SIGNAL] flashcard: {logged} logged, {failed} failed "
           f"for session '{session_id}'")
     return {"logged": logged, "failed": failed}
