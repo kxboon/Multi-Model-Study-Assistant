@@ -1,20 +1,31 @@
 # =============================================================================
 # Multimodal Study Assistant - Python 3.11 dependencies
+#
+# NOTE: keep this file pure ASCII. pip below ~24.1 reads requirements files
+# using the system locale encoding (gbk on this machine), so a non-ASCII
+# character such as an em dash aborts the whole install with
+# "UnicodeDecodeError: 'gbk' codec can't decode byte ...".
 # =============================================================================
 
 # --- Web framework ---
 fastapi==0.111.1
 uvicorn[standard]==0.30.1
+# Required for multipart form uploads. FastAPI's File()/Form() parameters in
+# the /ingest endpoint raise at request time without it - not optional.
+python-multipart==0.0.26
+
+# --- Frontend ---
+streamlit==1.35.0
 
 # --- Automatic speech recognition (runs fully locally, no API key) ---
-openai-whisper==20231117
+openai-whisper==20250625
 
 # --- Vision / image captioning (BLIP model via HuggingFace) ---
 transformers==4.41.2
 # Pillow handles all PIL image operations (open, convert, resize)
 Pillow==10.3.0
 
-# --- OCR (requires Tesseract binary on the OS — see README) ---
+# --- OCR (requires Tesseract binary on the OS - see README) ---
 pytesseract==0.3.10
 
 # --- Text embeddings (used for both ingest and retrieval) ---
@@ -26,7 +37,7 @@ chromadb==0.5.3
 # --- Document parsing ---
 # PDF text extraction
 pdfplumber==0.11.1
-# PDF page → PIL image conversion (used for image-heavy pages)
+# PDF page -> PIL image conversion (used for image-heavy pages)
 pdf2image==1.17.0
 # PowerPoint parsing
 python-pptx==1.0.0
@@ -42,13 +53,33 @@ python-dotenv==1.0.1
 
 # --- Testing ---
 pytest==8.2.2
-pytest-asyncio==0.23.7
 
-# --- PyTorch (CPU-only build — avoids the ~2 GB CUDA download) ---
-# Install BEFORE the rest of this file using the PyTorch index:
-#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-# Versions below reflect the latest CPU wheel available at project creation time.
-# Do NOT pin these here — let pip resolve against the whl index above.
-# torch>=2.3
-# torchvision>=0.18
-# torchaudio>=2.3
+# =============================================================================
+# PyTorch (CPU-only build - avoids the ~2 GB CUDA download)
+#
+# IMPORTANT: `pip install -r requirements.txt` ALONE DOES NOT PRODUCE A WORKING
+# ENVIRONMENT. torch cannot be listed as a requirement in this file: the "+cpu"
+# builds live only on the PyTorch wheel index, and a plain `torch==` line would
+# resolve against PyPI and pull the CUDA build. Install it FIRST, with these
+# exact versions:
+#
+#   pip install torch==2.11.0+cpu torchvision==0.26.0+cpu torchaudio==2.11.0+cpu --index-url https://download.pytorch.org/whl/cpu
+#   pip install -r requirements.txt
+#
+# In that order. openai-whisper and sentence-transformers both depend on torch,
+# so installing this file first would drag in the CUDA build as a transitive
+# dependency and defeat the point.
+#
+# These versions are PINNED FOR REPRODUCIBILITY, not merely as minimums. The
+# project reports latency and accuracy measurements - transcription, captioning,
+# embedding, retrieval and sentiment timings, and the model outputs behind them
+# - all taken under this exact stack. Installing a different torch may change
+# both the numbers and the results they describe, so the reported figures would
+# no longer correspond to the environment being run.
+#
+# Recorded here for reference only - do NOT uncomment, they would resolve
+# against PyPI and defeat the purpose:
+# torch==2.11.0+cpu
+# torchvision==0.26.0+cpu
+# torchaudio==2.11.0+cpu
+# =============================================================================

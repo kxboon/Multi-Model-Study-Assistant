@@ -24,7 +24,6 @@ st.set_page_config(
 # Session state initialisation
 # ---------------------------------------------------------------------------
 # Chat history and uploaded-file lists are keyed BY MODULE so switching modules
-# shows that module's own conversation and files. In-memory only — everything
 # here resets when the Streamlit process restarts.
 if "messages" not in st.session_state:
     st.session_state.messages = {}  # {module: [{role, content, sources}]}
