@@ -454,3 +454,478 @@ otherwise colour that feedback.
 - `verification/verify_isolation.py` — isolation harness
 - `verification/bucket_b_verification.json` — record 5 holds the isolation run,
   with every retrieved chunk's `session_id`, `source_file` and distance
+
+# Bucket B — Task 3: Wire sentiment classifier into the query pipeline
+
+**Scope:** Run sentiment classification on student questions and persist a
+per-topic affect signal for later aggregation.
+
+**Status:** Complete. The default classifier was found unsuitable on evidence and
+replaced; the pipeline itself is model-agnostic.
+
+---
+
+## 1. Defect found before any wiring: `device=0`
+
+`sentiment_model.py` initialised its pipeline with `device=0`, which selects the
+first CUDA device. The development machine has integrated AMD graphics and a
+CPU-only PyTorch build (`2.11.0+cpu`, `torch.cuda.is_available()` is `False`), so
+the call could never have succeeded — it would have failed inside PyTorch on
+first use with a "not compiled with CUDA" error. Changed to `device=-1`, which
+the file's own comment already documented as the CPU setting.
+
+This is the **fifth** defect in the same pattern (after the ChromaDB
+`None`-metadata constraint, chunk duplication, temp-filename provenance, and
+ffmpeg PATH). `test_sentiment.py` patches `transformers.pipeline` entirely, so
+`device=0` was never evaluated by anything real across four passing tests. The
+sentiment path had genuinely never executed outside mocks.
+
+Measured after the fix: warm load 0.40 s, inference 21.4 ms per short string. The
+first call took 31.4 s, but that included a one-time ~268 MB weight download and
+is not a steady-state figure.
+
+---
+
+## 2. Design decisions
+
+**Classify the question text only**, not the student's reaction to an answer.
+Simplest defensible unit, and it is the text the pipeline already has.
+
+**Topic granularity is the module.** `topic` is set to `session_id`. Finer-grained
+topic extraction would require either another model or a keyword pass, and was
+judged out of scope. `topic` is nonetheless stored as its own field rather than
+aliased to `session_id`, so a finer definition can replace it without a schema
+change.
+
+**JSON storage, not SQLite.** The confidence tracker is a feature, not a
+contribution; aggregation is a `defaultdict` over a few hundred records, and SQL
+buys nothing at that volume. The existing `query_debug.json` pattern is reused,
+including its corrupt-file guard. The tradeoff accepted: whole-file read and
+rewrite per append, which is O(n) and would need revisiting over a term of heavy
+use.
+
+**Generic `signal_type` field from the start.** Recorded so that quiz-performance
+signals could later be logged without a schema migration — which is exactly what
+happened in task 4.
+
+**Classification runs at the endpoint, not inside `query_rag`.** The endpoint has
+both the question and the retrieval metadata, and keeping it out of `retrieve.py`
+means the verification harnesses that call `query_rag` directly do not emit
+signals as a side effect.
+
+Record shape:
+
+```json
+{"timestamp": "...", "session_id": "CM3060", "topic": "CM3060",
+ "signal_type": "sentiment", "value": "neutral", "score": 0.94,
+ "question": "...", "retrieved_sources": ["L6.pptx"]}
+```
+
+`retrieved_sources` is stored although nothing currently reads it: the data is
+already available from retrieval, and recording it preserves the option of
+aggregating at file granularity later without re-running anything.
+
+---
+
+## 3. Failure isolation
+
+A signal-logging failure must never fail a query — the student should get their
+answer regardless. This was proven rather than assumed, by injecting three
+distinct failures:
+
+| Injected failure | Result |
+|------------------|--------|
+| `predict()` raises `RuntimeError` | HTTP 200, answer returned |
+| `log_signal()` raises `OSError` | HTTP 200, answer returned |
+| `predict()` returns a malformed dict | HTTP 200, answer returned |
+
+Each logged a warning and continued.
+
+A module-level singleton loads the model once per server lifetime rather than per
+request. Confirmed in live runs: 0.69 s on the first request, 0.03 s thereafter.
+
+---
+
+## 4. Principal finding: the default classifier cannot detect what it was wired in to detect
+
+The first live run exposed the problem immediately.
+
+| Question | SST-2 result |
+|----------|-------------|
+| "What is natural language processing used for?" (neutral) | NEGATIVE 0.9961 |
+| "I still don't understand this at all" (frustrated) | NEGATIVE 0.9990 |
+
+A gap of 0.003 between a plainly neutral factual question and genuine
+frustration. There is no signal here to threshold on.
+
+The cause is the model, not the wiring.
+`distilbert-base-uncased-finetuned-sst-2-english` is trained on SST-2, a binary
+movie-review corpus. It has **no neutral class**, so every input is forced into
+POSITIVE or NEGATIVE, and it emits a high-confidence score either way. Factual
+questions contain no positive sentiment markers, so they land reliably NEGATIVE.
+
+The practical consequence: a confidence tracker built on this signal would report
+every module as low-confidence regardless of how the student actually felt. The
+plumbing was correct and the schema was right; the instrument was wrong.
+
+This was not an unanticipated failure. The preliminary report deferred the choice
+explicitly — "sentiment classification will use a Hugging Face transformer, with
+the specific model deferred pending empirical comparison". This is the first data
+point of that comparison, and it rejected the default.
+
+### Replacement: a three-class model
+
+`cardiffnlp/twitter-roberta-base-sentiment-latest` returns
+negative / neutral / positive. Tested standalone before adoption, on five inputs
+chosen to include the cases the incumbent failed:
+
+| Input | Expected | 3-class | SST-2 |
+|-------|----------|---------|-------|
+| "What is natural language processing used for?" | neutral | neutral 0.934 | NEGATIVE 0.996 |
+| "I still don't understand this at all" | frustrated | negative 0.792 | NEGATIVE 0.999 |
+| "That explanation finally made it click, thanks" | positive | positive 0.879 | POSITIVE 1.000 |
+| "what is lemmatization" | no affect | neutral 0.597 | NEGATIVE 0.991 |
+| "why is this so confusing" | frustrated | negative 0.751 | NEGATIVE 0.999 |
+
+Neutral questions now carry negative mass of 0.036 and 0.375 against 0.75–0.79
+for genuine frustration — a gap wide enough to threshold on, where the incumbent
+offered 0.003.
+
+The replacement's confidences are lower across the board (0.60–0.93 versus
+0.99+). This is the model being calibrated rather than worse: SST-2's uniform
+>0.99 was false confidence produced by having only two bins to sort every input
+into.
+
+Confirmed end-to-end on two unseen inputs (not among the five it was selected
+against): a neutral question recorded `neutral 0.942`, a frustrated one recorded
+`negative 0.855`.
+
+### Cost
+
+| | 3-class (RoBERTa-base) | SST-2 (DistilBERT) |
+|---|---|---|
+| Warm load | 1.27 s | 0.40 s |
+| Mean inference | 41.3 ms | 21.4 ms |
+
+Roughly twice the cost, as expected for a model twice the size. Against 40–60 s
+of Ollama generation this is under 0.1% of request time — irrelevant in practice.
+
+### Threshold guidance for aggregation
+
+The weakest case is `"what is lemmatization"` — neutral 0.597, negative 0.375.
+Terse, affectless text is genuinely ambiguous to this model, and a blunter phrasing
+could tip it to negative. Since terse queries are the most common real input, the
+aggregation step **must not treat a bare `negative` label as evidence of
+struggle**; a score threshold of roughly 0.6 or above should be required.
+
+---
+
+## 5. Secondary finding: a passing test can be testing a fiction
+
+Two of the four sentiment tests asserted `"POSITIVE"` and `"NEGATIVE"` — strings
+the replacement model can never emit. Both continued to pass, because they assert
+against their own mocked return values. Green, but no longer evidence that the
+wrapper handles real output.
+
+One test's docstring also claimed it "should correctly identify NEGATIVE
+sentiment". It does no such thing: the pipeline is mocked, so it verifies only
+that the wrapper passes a label through untouched. The wording implied
+model-quality coverage that does not exist.
+
+Both were corrected to the real vocabulary. This is the same blind spot that
+produced the `device=0` defect, in a second form: mocked tests can drift silently
+out of correspondence with the thing they claim to cover, and remain green
+throughout.
+
+---
+
+## 6. Limitations
+
+- **Sentiment polarity is a proxy for confidence, not a measure of it.** A
+  student writing "I still don't get backpropagation" is expressing confusion,
+  which is not the same construct as negative sentiment. D'Mello and Graesser
+  report 68–78% accuracy for text-based affect classification, and that was on
+  affect-rich tutoring dialogue rather than terse database-style queries. The
+  signal should be read as a rough indicator.
+- **The signal will be sparse.** Most study questions carry no affective content
+  at all. Meaningful signal arises only when a student explicitly expresses
+  frustration or satisfaction, which is a minority of interactions.
+- **The replacement model is trained on tweets**, a domain mismatch with study
+  questions — though arguably no worse a mismatch than movie reviews.
+- **Module-level granularity.** The tracker can report that a student appears to
+  be struggling with a module, not which parts of it.
+- Model selection was made against five hand-chosen inputs plus two live
+  confirmations. This is a sanity check, not a systematic comparison.
+
+---
+
+## 7. Deferred
+
+| Item | Where |
+|------|-------|
+| Explicit self-rating control ("Got it / Partly / Still lost") after each answer, as a second channel. Would give direct confidence data rather than an inferred proxy, and comparing the two would test whether text-based affect detection works in a terse query interface at all — a direct test of D'Mello and Graesser's applicability outside tutoring dialogue. | Bucket F if time allows |
+| Systematic comparison of sentiment models against a labelled set of real student queries, rather than five hand-chosen examples | Bucket C |
+| Audit remaining test docstrings for the overclaim pattern found in section 5 | Any |
+
+# Bucket B — Task 4: Quiz generator
+
+**Scope:** Structured-prompt extension of the RAG path producing multiple-choice
+questions from ingested material, with deterministic marking and per-question
+signal logging.
+
+**Status:** Complete and working. Question *correctness* is materially limited by
+source text quality — see sections 4 and 5.
+
+---
+
+## 1. Design decisions
+
+**Multiple-choice only.** Free-text answers would require the language model to
+grade them, which reintroduces exactly the failure mode documented in tasks 1–2:
+the model producing confident but incorrect judgements. With MCQ, the model
+supplies a `correct_index` at generation time and marking is a plain integer
+comparison in Python. Open-ended questions were considered and deferred; they
+have pedagogical value as retrieval practice but cannot be marked reliably, and
+they would need a second generation path and result flow.
+
+**Configuration form rather than conversational setup.** Generation is a single
+request carrying topic, question count and module, rather than a multi-turn
+exchange. On CPU-only hardware each model call costs 20–60 seconds, so a
+back-and-forth setup would cost minutes before the first question appeared.
+
+**One generation call, not one per question.** Five questions in a single call
+takes roughly the same wall-clock time as one, since generation cost scales with
+output tokens rather than request count.
+
+**Marking in Python, not by the model.** The model is never asked to grade. This
+was the point of choosing MCQ, and it is worth stating explicitly because the
+reliability problem did not disappear — it moved upstream (section 4).
+
+**Retrieval reuses `query_rag`.** Quiz generation retrieves on the supplied topic
+through the same function the chat path uses, so questions are grounded in the
+same chunks a chat answer would draw on, and session isolation applies unchanged.
+
+**Separate generation helper.** Quiz generation does not reuse `ask_ollama`,
+whose prompt wraps the request in "answer using ONLY the notes" instructions that
+conflict with an instruction to emit JSON. A separate non-streaming call at
+temperature 0.2 is used instead.
+
+---
+
+## 2. Structured output reliability
+
+The main technical risk was whether Llama 3.2 3B would emit parseable JSON
+consistently. A lenient parser was written to handle failure: strip markdown
+fences, tolerate trailing commas and surrounding prose, salvage individual items
+from a malformed array, and return whatever validates rather than failing the
+whole request.
+
+Tested against nine malformed shapes:
+
+| Input | Result |
+|-------|--------|
+| Clean array | 2 items |
+| Markdown fences | 1 item, warns |
+| Prose preamble and postamble | 1 item, warns |
+| Trailing comma | 2 items |
+| One broken item among good ones | 2 kept, 1 rejected with reason |
+| `correct_index` out of range | Bad item rejected, others kept |
+| `source_chunk_index` out of range | Item kept, provenance dropped |
+| Unparseable array (missing comma) | 2 salvaged individually |
+| No JSON at all | 0 items, warns |
+
+A bad `source_chunk_index` degrades to "no source shown" rather than discarding
+the question: provenance is desirable, `correct_index` is load-bearing.
+
+**In practice the leniency was not needed.** Every live generation returned a
+clean JSON array with no fences or preamble. Parsing cost is negligible
+(0.0001 s against 61.5 s generation). The model's structured-output reliability
+on this task was better than anticipated; the parser remains as insurance and
+because malformed output cannot be ruled out across a larger sample.
+
+---
+
+## 3. Measurements
+
+| Stage | Time |
+|-------|------|
+| Generation, 5 items (Ollama, Llama 3.2 3B) | 61.50 s |
+| Parsing | 0.0001 s |
+| Marking | Immediate (integer comparison) |
+
+Generation dominates, consistent with every other measurement in this project.
+A five-item quiz costs roughly the same as one long chat answer.
+
+---
+
+## 4. Principal finding: question correctness tracks source text quality
+
+Three quizzes were generated and every item checked by hand against the source
+chunk shown in its provenance panel.
+
+| Quiz | Source | Source text quality | Items | Hard keying errors | Ambiguous |
+|------|--------|--------------------|-------|--------------------|-----------|
+| 1 | NLP lecture audio | Clean transcript | 5 | 1 | 0 |
+| 2 | Bayes slide image | OCR-degraded | 5 | 2 | 1 |
+| 3 | NLP lecture audio | Clean transcript | 5 | 0 | 1 |
+
+A *hard keying error* means the item's `correct_index` points at an answer the
+source does not support, so a student answering correctly is marked wrong. An
+*ambiguous* item has more than one defensible answer with only one keyed.
+
+**Clean-source quizzes: 9 of 10 items correctly keyed.**
+**OCR-source quiz: 2 of 5 items correctly keyed.**
+
+### The OCR-sourced failures in detail
+
+The retrieved chunk for the Bayes slide reads, in part:
+`Baves's rule and probabilistic inference … LIKEL\HOOD | PR [OR …
+P(A|B)=IP(B|A)*P(A)I/P(B)`
+
+Two of the three failures are directly attributable to that damage:
+
+- One question asked for a formula the slide never gives, and keyed the answer
+  to `IP(B|A)P(A)` — a fragment of the mangled `P(A|B)` formula, with the OCR's
+  corrupted bracket characters embedded in it. The question is unanswerable and
+  the key is an OCR artifact.
+- One question asserted that the posterior probability is "a form of
+  likelihood". This is false — the posterior is P(A|B), the likelihood is
+  P(B|A), and the slide defines them as distinct terms. The definitions survived
+  OCR but their mapping to notation did not, and the model reconstructed the
+  relationship incorrectly.
+
+The third (ambiguous) item paraphrased two different slide sentences into two
+options, both defensible.
+
+### The compounding failure chain
+
+This is the same degradation documented in task 1, now propagating one stage
+further:
+
+> BLIP caption uninformative on a text-heavy slide → the image path depends
+> entirely on OCR → OCR mangles mathematical notation → chat answers built on
+> those chunks contain factual errors (the prior/posterior conflation recorded in
+> task 1) → quiz items generated from the same chunks inherit the damage and are
+> mis-keyed.
+
+A single ingest-stage weakness degrades every downstream feature built on it.
+This is the clearest demonstration in the project so far that retrieval-grounded
+output is bounded by ingest quality, and it argues for treating ingest fidelity
+as a first-class evaluation target rather than a preliminary step.
+
+### Why this matters for the confidence tracker
+
+Quiz results were intended as the *objective* signal balancing the noisier
+sentiment channel. If a portion of items are mis-keyed, a low score may reflect
+bad questions rather than weak understanding — and the tracker cannot distinguish
+the two. The clean-source rate (9/10) is usable; the OCR-source rate (2/5) is
+not. Aggregation should therefore be read with source modality in mind, and this
+limitation stated wherever quiz-derived confidence is reported.
+
+### Not detectable downstream
+
+Marking is faithful to `correct_index`, and `correct_index` is what is wrong.
+No validation in the pipeline can catch this, because the pipeline has no
+independent notion of the right answer. The mitigation implemented is
+transparency rather than correction: the source chunk is displayed alongside
+every marked question, so a student who disagrees with a verdict can check the
+material themselves.
+
+---
+
+## 5. Secondary finding: questions test recall, not understanding
+
+Across all three quizzes the generated items ask for surface facts — what a stage
+is called, which tool derives a word stem, what a term stands for. None ask why a
+stage is ordered as it is, when one technique is preferable to another, or what
+fails if a step is omitted. A student could answer most items correctly from a
+single skim without conceptual grasp.
+
+Two causes:
+
+**The chunk is the wrong unit for conceptual questions.** A ~200-word chunk
+contains statements of fact, not arguments spanning a topic. Questions requiring
+synthesis across chunks are not available to a generator that sees only the
+retrieved set for one topic.
+
+**The prompt does not ask for difficulty.** It requests multiple-choice items
+from the supplied chunks, so the model produces the most readily extractable
+thing, which is definitions.
+
+This is worth recording because it was **predicted in the literature review
+before any code was written**. Chapter 2 notes that Karpicke and Roediger's
+retrieval-practice evidence comes from paired-associate vocabulary learning, and
+that "retrieving the definition of a term such as 'gradient descent' is closer to
+vocabulary recall, but understanding how the algorithm minimizes loss is not".
+The generator has landed squarely at the vocabulary-recall end of that gap. The
+retrieval-practice benefit claimed for the feature therefore rests on the part of
+the literature whose generalisation to conceptual learning the review already
+flagged as open.
+
+Whether prompting explicitly for application-level questions improves this is
+testable, but improvement could not be verified without a difficulty rubric, and
+Llama 3.2 3B on CPU has limited headroom. Recorded as an improvement rather than
+attempted.
+
+---
+
+## 6. Signal schema: cross-type aggregation
+
+Quiz results are logged through the same `log_signal` path as sentiment, one
+record per question, with `signal_type: "quiz"` and `value: "correct"` /
+`"incorrect"`. No schema change was needed — which is what the generic
+`signal_type` field was introduced for in task 3.
+
+One correction was required before the schema was sound. Quiz records initially
+set `topic` to the quiz's subject string while sentiment records set it to
+`session_id`, so the two signal types meant different things by the same field
+and could not be grouped together. `topic` now mirrors `session_id` for both, and
+the quiz's own subject is kept in a separate `quiz_topic` field so the
+granularity is not lost. The invariant — every signal type must mean the same
+thing by `topic` — is now documented in `signals.py` alongside the schema.
+
+`quiz_topic` is absent from sentiment records, so any reader must use `.get()`
+rather than direct indexing.
+
+Marking happens in the frontend, so a thin `POST /quiz/signals` endpoint exists
+for it to record outcomes rather than importing `backend.signals` and writing to
+the signals file behind the API.
+
+---
+
+## 7. Defect found in manual testing
+
+Formula text in answer options rendered incorrectly: `P(A|B)=[P(B|A)*P(A)]/P(B)`
+displayed as `*P(B|A)P(A)/P(B)`, because Streamlit's markdown renderer consumed
+the asterisks as emphasis markers. Cosmetic but misleading on exactly the
+material where precision matters most. Fixed.
+
+As in task 2, this was invisible to programmatic verification — the API returned
+correct strings throughout; only the rendered interface showed the corruption.
+
+---
+
+## 8. Limitations
+
+- Question correctness was assessed by hand across three quizzes (15 items). This
+  is a small sample and the author both knows the source material and built the
+  system, so the judgement is not independent.
+- Item quality was judged for keying correctness and ambiguity only, not against
+  a pedagogical rubric.
+- Only two source modalities were sampled (clean audio transcript, OCR-degraded
+  image). PDF and PPTX sources were not tested and may fall between the two.
+- Difficulty is not controlled. A difficulty selector was considered and left
+  out: the model has no reliable basis for self-assessing difficulty, and
+  offering the control would imply a calibration that does not exist.
+- Generated quizzes are not persisted. Closing the browser loses them.
+
+---
+
+## 9. Deferred
+
+| Item | Where |
+|------|-------|
+| Open-ended questions as unmarked retrieval practice, with the source chunk revealed for self-assessment | Bucket F if time allows |
+| Prompting for application-level rather than definitional questions; would need a rubric to evaluate | Bucket C or F |
+| Measuring quiz keying accuracy on PDF and PPTX sources to complete the source-quality picture | Bucket C |
+| Applying the PPTX path's OCR-first logic to `_process_image`, which would not fix OCR quality but would stop uninformative BLIP captions entering chunks | Bucket B or C |
