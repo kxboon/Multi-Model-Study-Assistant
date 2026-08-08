@@ -40,6 +40,12 @@ if "created_modules" not in st.session_state:
     # selectable in the meantime.
     st.session_state.created_modules = []
 
+if "quiz" not in st.session_state:
+    # Keyed by module, same as messages and ingested_files, so switching
+    # modules never shows a quiz generated from another module's material.
+    # {module: {"topic": str, "items": [...], "meta": {...}, "results": [...]}}
+    st.session_state.quiz = {}
+
 
 # ---------------------------------------------------------------------------
 # Helper — call backend
@@ -80,6 +86,41 @@ def query_backend(question: str, session_id: str) -> dict:
     r = requests.post(f"{API_URL}/query", json=payload, timeout=600)
     r.raise_for_status()
     return r.json()
+
+
+def generate_quiz(topic: str, session_id: str, n_questions: int) -> dict:
+    """POST to /quiz and return the generated items plus their metadata."""
+    payload = {
+        "topic": topic,
+        "session_id": session_id,
+        "n_questions": n_questions,
+    }
+    r = requests.post(f"{API_URL}/quiz", json=payload, timeout=900)
+    r.raise_for_status()
+    return r.json()
+
+
+def post_quiz_signals(session_id: str, topic: str, results: list) -> dict:
+    """POST marked outcomes to /quiz/signals so each becomes a learning signal.
+
+    Callers must treat a failure here as non-fatal — the student's score is
+    already computed and displayed by the time this runs.
+    """
+    payload = {
+        "session_id": session_id,
+        "topic": topic,
+        "results": [
+            {
+                "question": r["question"],
+                "correct": r["correct"],
+                "source_file": r.get("source_file"),
+            }
+            for r in results
+        ],
+    }
+    resp = requests.post(f"{API_URL}/quiz/signals", json=payload, timeout=60)
+    resp.raise_for_status()
+    return resp.json()
 
 
 # ---------------------------------------------------------------------------
@@ -213,7 +254,7 @@ with st.sidebar:
 # ---------------------------------------------------------------------------
 # Main area — chat interface
 # ---------------------------------------------------------------------------
-st.title("💬 Ask Your Notes")
+st.title("📖 Study Workspace")
 
 if not module:
     st.info("👈 Create a module in the sidebar to get started.")
@@ -223,73 +264,244 @@ st.caption(
     f"Module: **{module}** — answers are grounded only in this module's material."
 )
 
-# This module's history. setdefault returns the live list, so appends below
-# write straight back into st.session_state.messages[module].
-messages = st.session_state.messages.setdefault(module, [])
+tab_chat, tab_quiz = st.tabs(["💬 Chat", "📝 Quiz"])
 
-# Render existing chat history
-for msg in messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+# ---------------------------------------------------------------------------
+# Chat tab — behaviour unchanged, only relocated inside the tab
+# ---------------------------------------------------------------------------
+with tab_chat:
+    # This module's history. setdefault returns the live list, so appends below
+    # write straight back into st.session_state.messages[module].
+    messages = st.session_state.messages.setdefault(module, [])
 
-        # Show sources below assistant messages if available
-        if msg["role"] == "assistant" and msg.get("sources"):
-            with st.expander(f"📎 Sources ({len(msg['sources'])} chunks)"):
-                for i, src in enumerate(msg["sources"], 1):
-                    source_file = src.get("source_file", "unknown")
-                    source_type = src.get("source_type", "")
-                    page = src.get("page_or_slide")
-                    page_str = f" — page/slide {page}" if page else ""
-                    st.markdown(f"**{i}.** `{source_file}` ({source_type}){page_str}")
+    # Render existing chat history
+    for msg in messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
 
-# Chat input
-if question := st.chat_input("Ask a question about your notes..."):
+            # Show sources below assistant messages if available
+            if msg["role"] == "assistant" and msg.get("sources"):
+                with st.expander(f"📎 Sources ({len(msg['sources'])} chunks)"):
+                    for i, src in enumerate(msg["sources"], 1):
+                        source_file = src.get("source_file", "unknown")
+                        source_type = src.get("source_type", "")
+                        page = src.get("page_or_slide")
+                        page_str = f" — page/slide {page}" if page else ""
+                        st.markdown(f"**{i}.** `{source_file}` ({source_type}){page_str}")
 
-    # Show the user's message immediately
-    messages.append({"role": "user", "content": question, "sources": []})
-    with st.chat_message("user"):
-        st.markdown(question)
+    # Chat input
+    if question := st.chat_input("Ask a question about your notes..."):
 
-    # Call backend and stream a spinner while waiting
-    with st.chat_message("assistant"):
-        with st.spinner("Thinking... (this may take 1-2 minutes on CPU)"):
-            try:
-                result = query_backend(question, module)
-                answer = result.get("answer", "No answer returned.")
-                sources = result.get("sources", [])
+        # Show the user's message immediately
+        messages.append({"role": "user", "content": question, "sources": []})
+        with st.chat_message("user"):
+            st.markdown(question)
 
-                st.markdown(answer)
+        # Call backend and stream a spinner while waiting
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking... (this may take 1-2 minutes on CPU)"):
+                try:
+                    result = query_backend(question, module)
+                    answer = result.get("answer", "No answer returned.")
+                    sources = result.get("sources", [])
 
-                # Show sources inline
-                if sources:
-                    with st.expander(f"📎 Sources ({len(sources)} chunks)"):
-                        for i, src in enumerate(sources, 1):
-                            source_file = src.get("source_file", "unknown")
-                            source_type = src.get("source_type", "")
-                            page = src.get("page_or_slide")
-                            page_str = f" — page/slide {page}" if page else ""
-                            st.markdown(f"**{i}.** `{source_file}` ({source_type}){page_str}")
+                    st.markdown(answer)
 
-                # Save to history
-                messages.append(
-                    {"role": "assistant", "content": answer, "sources": sources}
+                    # Show sources inline
+                    if sources:
+                        with st.expander(f"📎 Sources ({len(sources)} chunks)"):
+                            for i, src in enumerate(sources, 1):
+                                source_file = src.get("source_file", "unknown")
+                                source_type = src.get("source_type", "")
+                                page = src.get("page_or_slide")
+                                page_str = f" — page/slide {page}" if page else ""
+                                st.markdown(f"**{i}.** `{source_file}` ({source_type}){page_str}")
+
+                    # Save to history
+                    messages.append(
+                        {"role": "assistant", "content": answer, "sources": sources}
+                    )
+
+                except requests.exceptions.HTTPError as e:
+                    error_msg = f"❌ Query failed: {e.response.status_code} — {e.response.text}"
+                    st.error(error_msg)
+                    messages.append(
+                        {"role": "assistant", "content": error_msg, "sources": []}
+                    )
+                except requests.exceptions.Timeout:
+                    msg = "❌ Request timed out. The model is taking too long — try a shorter question."
+                    st.error(msg)
+                    messages.append(
+                        {"role": "assistant", "content": msg, "sources": []}
+                    )
+                except Exception as e:
+                    msg = f"❌ Unexpected error: {e}"
+                    st.error(msg)
+                    messages.append(
+                        {"role": "assistant", "content": msg, "sources": []}
+                    )
+
+
+# ---------------------------------------------------------------------------
+# Quiz tab — generate MCQs from this module, mark them locally
+# ---------------------------------------------------------------------------
+with tab_quiz:
+    quiz = st.session_state.quiz.get(module)
+
+    # --- Config form ---
+    with st.form("quiz_config"):
+        topic_input = st.text_input(
+            "Topic",
+            value=(quiz or {}).get("topic", ""),
+            placeholder="e.g. tokenization",
+            help="Questions are retrieved and written about this topic.",
+        )
+        n_questions = st.radio(
+            "Number of questions", [3, 5, 10], index=1, horizontal=True
+        )
+        generate = st.form_submit_button(
+            "Generate Quiz", type="primary", use_container_width=True
+        )
+
+    if generate:
+        topic_clean = topic_input.strip()
+        if not topic_clean:
+            st.warning("Enter a topic first.")
+        else:
+            with st.spinner(
+                f"Generating {n_questions} questions on '{topic_clean}'... "
+                "(this may take a few minutes on CPU)"
+            ):
+                try:
+                    data = generate_quiz(topic_clean, module, n_questions)
+                    st.session_state.quiz[module] = {
+                        "topic": topic_clean,
+                        "items": data.get("items", []),
+                        "requested": data.get("requested"),
+                        "parsed": data.get("parsed"),
+                        "generation_time_s": data.get("generation_time_s"),
+                        "warnings": data.get("warnings", []),
+                        # A fresh nonce namespaces this quiz's radio widgets, so
+                        # answers from a previous quiz cannot bleed into it.
+                        "nonce": str(time.time()),
+                        "results": None,
+                    }
+                    quiz = st.session_state.quiz[module]
+                except requests.exceptions.HTTPError as e:
+                    st.error(
+                        f"Quiz generation failed: {e.response.status_code} — "
+                        f"{e.response.text}"
+                    )
+                except requests.exceptions.Timeout:
+                    st.error("Quiz generation timed out — try fewer questions.")
+                except Exception as e:
+                    st.error(f"Error: {e}")
+
+    # --- Generated quiz ---
+    if quiz is not None and not quiz.get("items"):
+        st.error(
+            "No questions could be parsed from the model's output. "
+            "Try a different topic, or fewer questions."
+        )
+        if quiz.get("warnings"):
+            with st.expander("Parser notes"):
+                for w in quiz["warnings"]:
+                    st.markdown(f"- {w}")
+
+    elif quiz:
+        items = quiz["items"]
+        results = quiz.get("results")
+
+        if quiz.get("parsed") != quiz.get("requested"):
+            st.warning(
+                f"Generated {quiz['parsed']} of {quiz['requested']} requested "
+                "questions — the rest could not be parsed."
+            )
+        if quiz.get("warnings"):
+            with st.expander("Parser notes"):
+                for w in quiz["warnings"]:
+                    st.markdown(f"- {w}")
+
+        if results is None:
+            # --- Answering ---
+            with st.form(f"quiz_answers_{quiz['nonce']}"):
+                for i, item in enumerate(items):
+                    st.markdown(f"**Q{i + 1}. {item['question']}**")
+                    st.radio(
+                        "Choose one",
+                        options=list(range(len(item["options"]))),
+                        format_func=lambda k, it=item: it["options"][k],
+                        key=f"quiz_{module}_{quiz['nonce']}_{i}",
+                        index=None,
+                        label_visibility="collapsed",
+                    )
+                    st.divider()
+                submitted = st.form_submit_button(
+                    "Submit Quiz", type="primary", use_container_width=True
                 )
 
-            except requests.exceptions.HTTPError as e:
-                error_msg = f"❌ Query failed: {e.response.status_code} — {e.response.text}"
-                st.error(error_msg)
-                messages.append(
-                    {"role": "assistant", "content": error_msg, "sources": []}
+            if submitted:
+                # Marked in Python by comparing indices — the LLM is never
+                # asked whether an answer is right.
+                marked = []
+                for i, item in enumerate(items):
+                    selected = st.session_state.get(
+                        f"quiz_{module}_{quiz['nonce']}_{i}"
+                    )
+                    marked.append({
+                        "question": item["question"],
+                        "selected_index": selected,
+                        "correct_index": item["correct_index"],
+                        "correct": selected == item["correct_index"],
+                        "source_file": item.get("source_file"),
+                    })
+                quiz["results"] = marked
+
+                # Signal logging is best-effort: the score is already computed,
+                # so a failure here must not lose the student's marking.
+                try:
+                    post_quiz_signals(module, quiz["topic"], marked)
+                except Exception as e:
+                    st.warning(f"Score recorded locally, but signal logging failed: {e}")
+
+                # Outside the try — st.rerun() works by raising, so an except
+                # above would swallow it. Needed to swap the form for results.
+                st.rerun()
+
+        else:
+            # --- Marked results ---
+            score = sum(1 for r in results if r["correct"])
+            st.subheader(f"Score: {score} / {len(results)}")
+            st.progress(score / len(results) if results else 0.0)
+            st.divider()
+
+            for i, (item, result) in enumerate(zip(items, results), 1):
+                icon = "✅" if result["correct"] else "❌"
+                st.markdown(f"{icon} **Q{i}. {item['question']}**")
+
+                selected = result["selected_index"]
+                your_answer = (
+                    item["options"][selected] if selected is not None
+                    else "_(not answered)_"
                 )
-            except requests.exceptions.Timeout:
-                msg = "❌ Request timed out. The model is taking too long — try a shorter question."
-                st.error(msg)
-                messages.append(
-                    {"role": "assistant", "content": msg, "sources": []}
+                st.markdown(f"- Your answer: {your_answer}")
+                st.markdown(
+                    f"- Correct answer: **{item['options'][item['correct_index']]}**"
                 )
-            except Exception as e:
-                msg = f"❌ Unexpected error: {e}"
-                st.error(msg)
-                messages.append(
-                    {"role": "assistant", "content": msg, "sources": []}
-                )
+
+                # Provenance: the chunk this question was drawn from.
+                chunk_text = item.get("source_chunk_text")
+                if chunk_text:
+                    label = item.get("source_file") or "source"
+                    page = item.get("page_or_slide")
+                    if page:
+                        label += f" — page/slide {page}"
+                    with st.expander(f"📎 From {label}"):
+                        st.markdown(chunk_text)
+                else:
+                    st.caption("No source chunk recorded for this question.")
+                st.divider()
+
+            if st.button("New Quiz", use_container_width=True):
+                st.session_state.quiz.pop(module, None)
+                st.rerun()

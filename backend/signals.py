@@ -23,9 +23,18 @@ Two fields are deliberately loose:
 
 - `topic` currently mirrors `session_id`, but it is stored as its own field
   rather than aliased, so a finer-grained topic (a slide range, a concept)
-  can replace it later without rewriting existing records.
+  can replace it later without rewriting existing records. Every signal type
+  must mean the SAME thing by `topic`, otherwise records cannot be aggregated
+  across types — anything narrower belongs in a type-specific field instead.
 - `signal_type` names the kind of observation, so quiz-performance or
   time-on-task signals can be appended to the same file with no schema change.
+
+Signal types may add their own extra fields alongside the common ones. Current
+extras:
+
+- "quiz" records carry `quiz_topic`, the subject the questions were generated
+  from. It is deliberately NOT stored in `topic`, so that `topic` stays
+  comparable with the sentiment records.
 """
 
 import json
