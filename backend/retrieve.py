@@ -18,7 +18,7 @@ load_dotenv()
 
 import chromadb
 
-from backend.models.embedder import Embedder
+from backend.models.embedder import Embedder, collection_name
 
 # ---------------------------------------------------------------------------
 # Shared singletons — lazy model loading is handled inside Embedder
@@ -29,10 +29,13 @@ CHROMA_PATH = os.getenv("CHROMA_PATH", "./vectorstore/chroma_db")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
 
-# Reuse the same client / collection object across calls
+# Reuse the same client / collection object across calls.
+# The collection is derived from the active embedding model — a 384-dim and a
+# 768-dim model cannot share one collection, so they must not share a name.
+COLLECTION_NAME = collection_name()
 _chroma_client = chromadb.PersistentClient(path=CHROMA_PATH)
 _collection = _chroma_client.get_or_create_collection(
-    name="study_materials",
+    name=COLLECTION_NAME,
     metadata={"hnsw:space": "cosine"},
 )
 

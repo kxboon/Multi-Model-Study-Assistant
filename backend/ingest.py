@@ -26,7 +26,7 @@ import chromadb
 from backend.models.whisper_model import WhisperModel
 from backend.models.blip_model import BLIPModel
 from backend.models.ocr_model import OCRModel
-from backend.models.embedder import Embedder
+from backend.models.embedder import Embedder, collection_name
 
 # ---------------------------------------------------------------------------
 # Shared model instances — module-level singletons with lazy loading baked in
@@ -40,9 +40,12 @@ _embedder = Embedder()
 # ChromaDB persistent client — keeps the vector store between restarts
 # ---------------------------------------------------------------------------
 CHROMA_PATH = os.getenv("CHROMA_PATH", "./vectorstore/chroma_db")
+# Derived from the active embedding model, so ingest and retrieve always agree
+# on which collection holds vectors of the dimensionality they produce.
+COLLECTION_NAME = collection_name()
 _chroma_client = chromadb.PersistentClient(path=CHROMA_PATH)
 _collection = _chroma_client.get_or_create_collection(
-    name="study_materials",
+    name=COLLECTION_NAME,
     # Cosine similarity is better than L2 for text embeddings
     metadata={"hnsw:space": "cosine"},
 )

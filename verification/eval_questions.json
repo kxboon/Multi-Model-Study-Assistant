@@ -1,0 +1,147 @@
+{
+  "session_id": "eval_set",
+  "note": "Ground truth is a (source_file, chunk_index) pair. Chunk indices restart at 0 for every source file, so an index alone is ambiguous. Questions with more than one acceptable chunk exist for two distinct reasons. Seven audio questions: the audio chunker uses ~50% overlap, so the same sentence genuinely lives in two adjacent chunks and retrieving either is correct. One PDF question (Q19): the PDF chunker does NOT overlap, and it split a passage mid-argument so the answer straddles two chunks - see that entry's note. single_gt marks the questions with exactly one acceptable chunk; those are the real discriminators, and the multi_gt subset should be read as the easier bucket rather than as evidence about the retriever.",
+  "questions": [
+    {
+      "id": 1,
+      "question": "What is the first stage of NLP called?",
+      "source_file": "Natural_Language_Processing.mp3",
+      "ground_truth": [4, 5],
+      "single_gt": false
+    },
+    {
+      "id": 2,
+      "question": "What is the word stem of running, runs, and ran?",
+      "source_file": "Natural_Language_Processing.mp3",
+      "ground_truth": [5],
+      "single_gt": true
+    },
+    {
+      "id": 3,
+      "question": "What entity is associated with the token Arizona?",
+      "source_file": "Natural_Language_Processing.mp3",
+      "ground_truth": [7],
+      "single_gt": true
+    },
+    {
+      "id": 4,
+      "question": "If a word's dictionary root differs from chopping its suffix, which technique finds the root?",
+      "source_file": "Natural_Language_Processing.mp3",
+      "ground_truth": [5, 6],
+      "single_gt": false
+    },
+    {
+      "id": 5,
+      "question": "Which conversion direction produces human-readable text from data?",
+      "source_file": "Natural_Language_Processing.mp3",
+      "ground_truth": [1],
+      "single_gt": true
+    },
+    {
+      "id": 6,
+      "question": "Why does removing suffixes fail for some words?",
+      "source_file": "Natural_Language_Processing.mp3",
+      "ground_truth": [5, 6],
+      "single_gt": false
+    },
+    {
+      "id": 7,
+      "question": "How many pieces does the shopping list sentence break into?",
+      "source_file": "Natural_Language_Processing.mp3",
+      "ground_truth": [4, 5],
+      "single_gt": false
+    },
+    {
+      "id": 8,
+      "question": "What distinguishes Siri from a written-language assistant?",
+      "source_file": "Natural_Language_Processing.mp3",
+      "ground_truth": [2, 3],
+      "single_gt": false
+    },
+    {
+      "id": 9,
+      "question": "How can a system tell junk mail from real mail?",
+      "source_file": "Natural_Language_Processing.mp3",
+      "ground_truth": [3, 4],
+      "single_gt": false
+    },
+    {
+      "id": 10,
+      "question": "What example shows meaning lost in round-trip translation?",
+      "source_file": "Natural_Language_Processing.mp3",
+      "ground_truth": [2],
+      "single_gt": true
+    },
+    {
+      "id": 11,
+      "question": "Why is NLP not a single algorithm?",
+      "source_file": "Natural_Language_Processing.mp3",
+      "ground_truth": [4],
+      "single_gt": true
+    },
+    {
+      "id": 12,
+      "question": "What must speech become before NLP can process it?",
+      "source_file": "Natural_Language_Processing.mp3",
+      "ground_truth": [4],
+      "single_gt": true
+    },
+    {
+      "id": 13,
+      "question": "Can the same word be different parts of speech?",
+      "source_file": "Natural_Language_Processing.mp3",
+      "ground_truth": [6, 7],
+      "single_gt": false
+    },
+    {
+      "id": 14,
+      "question": "What is the formula for the posterior probability P(A|B)?",
+      "source_file": "CM3060_L6_slide7_bayes.jpg",
+      "ground_truth": [0],
+      "single_gt": true
+    },
+    {
+      "id": 15,
+      "question": "Which probability represents knowledge before observing data?",
+      "source_file": "CM3060_L6_slide7_bayes.jpg",
+      "ground_truth": [0],
+      "single_gt": true
+    },
+    {
+      "id": 16,
+      "question": "What is the probability of falling under a specific category called?",
+      "source_file": "CM3060_L6_slide7_bayes.jpg",
+      "ground_truth": [0],
+      "single_gt": true
+    },
+    {
+      "id": 17,
+      "question": "How do you choose a function approximation algorithm?",
+      "source_file": "test_notes.pdf",
+      "ground_truth": [24],
+      "single_gt": true
+    },
+    {
+      "id": 18,
+      "question": "What representation is used for the target function?",
+      "source_file": "test_notes.pdf",
+      "ground_truth": [21],
+      "single_gt": true
+    },
+    {
+      "id": 19,
+      "question": "How are training examples chosen?",
+      "source_file": "test_notes.pdf",
+      "ground_truth": [12, 13],
+      "single_gt": false,
+      "note": "Ground truth widened from [12] to [12, 13] after the all-MiniLM-L6-v2 baseline run. Chunk 13 ('the learner controls the sequence of training examples ... the learner might rely on the teacher to select informative board states') answers this question as directly as chunk 12 does. Unlike the audio chunker, the PDF chunker does not overlap, so it split the passage mid-argument and the original single ground truth landed on the wrong half. This is a chunk-boundary labelling artifact, not a retrieval result. The correction was made before any model comparison, so every model is scored against the same question set; the baseline results file was regenerated against the corrected set."
+    },
+    {
+      "id": 20,
+      "question": "What issues does machine learning face?",
+      "source_file": "test_notes.pdf",
+      "ground_truth": [39],
+      "single_gt": true
+    }
+  ]
+}
