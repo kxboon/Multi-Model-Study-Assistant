@@ -54,6 +54,12 @@ python-dotenv==1.0.1
 # --- Testing ---
 pytest==8.2.2
 
+# --- Evaluation only (verification/ scripts, not imported by the app) ---
+# Word error rate scoring for the Whisper base-vs-small comparison in
+# verification/eval_whisper.py. Pulls in rapidfuzz as a dependency. The app
+# itself never imports this, so it can be omitted from a deployment install.
+jiwer==4.0.0
+
 # =============================================================================
 # PyTorch (CPU-only build - avoids the ~2 GB CUDA download)
 #

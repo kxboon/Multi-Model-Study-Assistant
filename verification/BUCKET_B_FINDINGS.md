@@ -136,10 +136,6 @@ already implemented (audio: 200-word window, 50-word overlap), so the open
 question for Bucket C is whether the current overlap is *sufficient*, not
 whether overlap exists.
 
-**ASR error propagation.** Whisper transcribed "lemma" as "Lem"; the error
-passed through chunking and retrieval and surfaced verbatim in the generated
-answer.
-
 **BLIP caption near-useless on a text-heavy slide.** The caption returned was
 `a poster with the words raves and probait` — "Bayes" and "probability"
 both misread. Retrieval value on this slide came almost entirely from OCR.
@@ -1049,20 +1045,19 @@ likely B is to be True`, including the meaningless `Is 0` fragment. "Marginality
 is not a term the slide defines; it is a fragment of a sentence about P(A) that
 the model promoted into a headword.
 
-### ASR errors continue to propagate
+### A single ASR error propagates into generated study material
 
-The audio deck produced cards headed **"Lematization"** defining the root as the
-**"Lem"** — Whisper's mis-transcription of *lemmatization* and *lemma*. These
-errors have now surfaced in three separate features: a chat answer (task 1), a
-quiz item (task 4), and flashcard terms here. An ingest-stage transcription error
-reaches the student verbatim through every downstream feature.
+The audio deck produced cards headed "Lematization" — Whisper's mis-transcription
+of lemmatization. (The cards also refer to the root as the "lem", but this is not
+a transcription error: the speaker uses that informal short form and the reference
+transcript reads the same way. The card is faithful to the audio.) This error has
+now surfaced in two separate features: a quiz item (task 4) and flashcard terms
+here — both evidenced in `signals.json`. An ingest-stage transcription error
+reaches the student verbatim through the generated study material.
 
-One card also drifted from source: *Entity recognition* was defined as
-identifying "names, locations, and organizations", whereas the transcript
-describes *named* entity recognition with the examples Arizona → US state and
-Ralph → person's name. The definition is generic knowledge about NER rather than
-what the source said — the same mild embellishment pattern recorded in tasks 1
-and 3.
+Whether it also reached chat answers is not established: answers were not
+persisted during Bucket B, so no artefact records what the model returned for any
+audio query.
 
 ### Flashcards degrade more gracefully than quizzes
 

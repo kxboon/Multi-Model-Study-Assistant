@@ -1,14 +1,16 @@
 """
 RAG retrieval and Ollama query logic.
 
-Two public functions:
+Three public functions:
 - query_rag()   — embed a question and retrieve similar chunks from ChromaDB
 - ask_ollama()  — build a RAG prompt and call the local Ollama LLM
+- log_answer()  — attach a generated answer to the debug record query_rag wrote
 """
 
 import json
 import os
 import time
+import uuid
 import requests
 from datetime import datetime
 from pathlib import Path
@@ -28,6 +30,42 @@ _embedder = Embedder()
 CHROMA_PATH = os.getenv("CHROMA_PATH", "./vectorstore/chroma_db")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
+
+# ---------------------------------------------------------------------------
+# Query debug log
+#
+# One record per retrieval, appended to query_debug.json:
+#
+#   id             stable uuid, so the answer can be attached to this exact record
+#   asked_at       when the retrieval ran
+#   question       the query string
+#   session_id     the module searched
+#   answer         what the model replied, filled in by log_answer() after
+#                  generation; stays null if generation failed or the caller
+#                  never generated (e.g. /quiz and /flashcards, which retrieve
+#                  through query_rag but produce JSON items rather than an answer)
+#   answered_at    when the answer was attached
+#   retrieved      the chunks passed to the model, with rank/distance/metadata
+#
+# NOTE: answers were NOT persisted before this change — every record written
+# prior to it has no "answer" key at all, not a null one. Absence of the key
+# means "never recorded"; a null value means "recorded, but no answer arrived".
+# Historical records therefore cannot show whether an ingest-stage error (an
+# ASR mis-transcription, say) actually reached the student in an answer; only
+# that the flawed chunk was retrieved into the model's context.
+# ---------------------------------------------------------------------------
+DEBUG_PATH = Path("query_debug.json")
+
+
+def _read_debug() -> list:
+    """Read the debug log, tolerating a missing, empty or corrupt file."""
+    try:
+        records = json.loads(DEBUG_PATH.read_text(encoding="utf-8")) if DEBUG_PATH.exists() else []
+    except (json.JSONDecodeError, ValueError):
+        # File exists but is empty or corrupt — start fresh rather than crashing
+        return []
+    return records if isinstance(records, list) else [records]
+
 
 # Reuse the same client / collection object across calls.
 # The collection is derived from the active embedding model — a 384-dim and a
@@ -87,29 +125,64 @@ def query_rag(
     metadatas = results["metadatas"][0]
     distances = results["distances"][0]
 
-    debug_path = Path("query_debug.json")
-    try:
-        existing = json.loads(debug_path.read_text(encoding="utf-8")) if debug_path.exists() else []
-    except (json.JSONDecodeError, ValueError):
-        # File exists but is empty or corrupt — start fresh rather than crashing
-        existing = []
+    entry_id = str(uuid.uuid4())
+    existing = _read_debug()
     existing.append({
+        "id": entry_id,
         "asked_at": datetime.now().isoformat(),
         "question": question,
         "session_id": session_id,
+        # Filled in later by log_answer(), once the model has actually replied.
+        # query_rag only retrieves, so the answer does not exist at this point.
+        "answer": None,
+        "answered_at": None,
         "retrieved": [
             {"rank": i + 1, "distance": distances[i], "metadata": metadatas[i], "text": chunks[i]}
             for i in range(len(chunks))
         ],
     })
-    debug_path.write_text(json.dumps(existing, indent=2, ensure_ascii=False), encoding="utf-8")
-    print(f"[CHUNKS] {len(chunks)} retrieved chunk(s) saved to query_debug.json")
+    DEBUG_PATH.write_text(json.dumps(existing, indent=2, ensure_ascii=False), encoding="utf-8")
+    print(f"[CHUNKS] {len(chunks)} retrieved chunk(s) saved to {DEBUG_PATH}")
 
     return {
         "chunks": chunks,
         "metadatas": metadatas,
         "distances": distances,
+        # Lets the caller attach the model's answer to this exact record.
+        "debug_id": entry_id,
     }
+
+
+def log_answer(debug_id: str, answer: str) -> bool:
+    """Attach the model's answer to the debug record query_rag wrote.
+
+    Called by the endpoint after generation succeeds, because query_rag is a
+    retrieval function and the answer does not exist while it runs.
+
+    Debug logging must never break a query that otherwise worked, so every
+    failure here is reported and swallowed rather than raised.
+
+    Returns:
+        True if the record was found and updated, False otherwise.
+    """
+    if not debug_id:
+        return False
+    try:
+        records = _read_debug()
+        for record in reversed(records):     # newest first: it is almost always the last
+            if record.get("id") == debug_id:
+                record["answer"] = answer
+                record["answered_at"] = datetime.now().isoformat()
+                DEBUG_PATH.write_text(
+                    json.dumps(records, indent=2, ensure_ascii=False),
+                    encoding="utf-8")
+                return True
+        print(f"[WARN] no debug record with id {debug_id}; answer not logged")
+        return False
+    except Exception as exc:                 # noqa: BLE001 - never fail the query
+        print(f"[WARN] could not log answer to {DEBUG_PATH}: "
+              f"{type(exc).__name__}: {exc}")
+        return False
 
 
 def ask_ollama(

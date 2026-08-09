@@ -1,0 +1,271 @@
+{
+  "run_at": "2026-08-09T22:29:36",
+  "audio": "sample_files/Natural_Language_Processing.mp3",
+  "reference": "verification/smoke/test_smoke_answer.md",
+  "normalisation": "lowercase; replace every non-[a-z0-9 whitespace] character with a space; split on whitespace",
+  "metrics": {
+    "wer": "word error rate, (S+D+I)/N over normalised words, via jiwer 4.0.0",
+    "similarity_ratio": "difflib.SequenceMatcher(None, hyp, ref, autojunk=False).ratio() over normalised word lists — the method used by verification/smoke/smoke_whisper.py, which recorded 97.27% for base"
+  },
+  "reference_words_raw": 1358,
+  "reference_words_cleaned": 1317,
+  "heading_words_removed": 41,
+  "headings_removed": [
+    "Unstructured data",
+    "Structured data",
+    "Natural Language Understanding (NLU) & Natural Language Generation (NLG)",
+    "Machine Translation use case",
+    "Virtual Assistance / Chat Bots use case",
+    "Sentiment Analysis use case",
+    "Spam Detection use case",
+    "Tokenization",
+    "Stemming & Lemmatization",
+    "Part of Speech Tagging",
+    "Named Entity Recognition (NER)",
+    "Summary"
+  ],
+  "runs": [
+    {
+      "model": "tiny",
+      "ok": true,
+      "model_was_cached": false,
+      "load_seconds": 6.49,
+      "transcribe_seconds": 38.28,
+      "characters": 6998,
+      "words": 1282,
+      "normalised_words": 1318,
+      "transcript": "What is natural language processing? Well, you're doing it right now, you're listening to the words and the sentences that I'm forming and you are forming some sort of comprehension from it. And when we ask a computer to do that, that is NLP on natural language processing. My name is Martin Keen, I'm a Master inventor at IBM and I've utilized NLP in a good number of my invention, disclosures. NLP really has a really high utility value in all sorts of AI applications. Now NLP starts with something called unstructured text. What is that? Well, that's just what you and I say, that's how we speak. So for example, some unstructured text is add eggs and milk to my shopping list. Now, you and I understand exactly what that means, but it is unstructured at least to a computer. So what we need to do is to have a structured representation of that same information that a computer can process. Now, that might look something a bit more like this, where we have a shopping list element. And then it has sub elements within it like an item for eggs and an item for milk. That is an example of something that is structured. Now, the job of natural language processing is to translate between these two things. So NLP sits right in the middle here, translating between unstructured and structured data. And when we go from unstructured here to structured this way, that called NLU or natural language understanding. And when we go this way from structured to unstructured, that's called natural language generation or NLG. We're going to focus today primarily on going from unstructured to structured in natural language processing. Now, let's think of some use cases where NLP might be quite handy. First of all, we've got machine translation. Now, when we translate from one language to another, we need to understand the context of that sentence. It's not just the case of taking each individual word from say English and translating it into another language. We need to understand the overall structure and context of what's being said. And my favorite example of this going horribly wrong is if you take the phrase, the spirit is willing, but the flesh is weak. And you translate that from English to Russian. And then you translate that Russian translation back into English. You're going to go from the spirit is willing, but the flesh is weak. To something a bit more like the vodka is good, but the meat is rotten, which is really not the intended context of that sentence whatsoever. So NLP can help with situations like that. Now, the second kind of use case that I like to mention relates to virtual assistance. And also to things like chatbot. Now, a virtual assistant, that's something like Siri or Alexa on your phone, that is taking human utterances and deriving a command to execute based upon that. And a chatbot is something similar except in written language and that's taking written language and then using it to traverse a decision tree in order to take an action. NLP is very helpful there. Another use case is for sentiment analysis. Now, this is taking some text, perhaps an email message or a product review and trying to derive the sentiment that it's expressed within it. So, for example, is this product review a positive sentiment or a negative sentiment? Is it written as a serious statement or is it being sarcastic? We can use NLP to tell us. And then finally, another good example is spam detection. So this is a case of looking at a given email message and trying to derive, is this a really email message or is it spam? And we can look for pointers within the content of the message. So things like overused words or poor grammar or an inappropriate claim of urgency. Can all indicate that this is actually perhaps spam? So those are some of the things that NLP can provide, but how does it work? Well, the thing with NLP is it's not like one algorithm. It's actually more like a bag of tools and you can apply these bag of tools to be able to resolve some of these use cases. Now, the input to NLP is some unstructured text, so either some written text or spoken text that has been converted to written text. So there's two written text through a speech to text algorithm. Once we've got that, the first stage of NLP is called tokenization. This is about taking a string and breaking it down into chunks. So if we consider the unstructured text we've got here, add eggs and milk to my shopping list. That's eight words that can be eight to tokens. And from here on in, we are going to work one token at a time as we traverse through this. Now, the first stage, once we've got things down into tokens that we can perform, is called stemming. And this is all about deriving the word stem for a given token. So for example, running runs and ran the word stem for all three of those is run. We're just kind of removing the prefix and the suffixes and normalizing the tense and we're getting to the word stem. But stemming doesn't work well for every token. For example, universal and university will really don't really stem down to universe. For situations like that, there is another tool that we have available and that is called limb-attization. And limitation takes a given token and learns its meaning through a dictionary definition. And from there, it can derive its root or its lem. So take better, for example, better is derived from good. So the root or the limb of better is good. The stem of better would be better. So you can see that it is significant whether we use stemming or we use limitation for a given token. Now next thing we can do is we can do a process called part of speech tagging. And what this is doing is for a given token, it's looking where that token is used within the context of a sentence. So take the word make, for example, if I say I'm going to make dinner, make is a verb. But if I ask you what make is your laptop well, make is now now. So where that token is used in the sentence matters part of speech tagging can help us derive that context. And then finally another stage is named entity recognition. And what this is asking is for a given token, is there an NTS associated with it? So for example, a token of Arizona has an entity of a US state, whereas a token of Ralph has an entity of a person's name. And these are some of the tools that we can apply in this big bag of tools that we have for NLP in order to get from this unstructured human speech through to something structured that a computer can understand. And once we've done that, then we can apply that structured data to all sorts of AI applications. Now there's obviously a lot more to it than this, and I've included some links in the description if you'd like to know more. But hopefully this made some sense, and that you were able to process some of the natural language that I shared today. Thanks for watching. If you have questions, please drop us a line below. And if you want to see more videos like this in the future, please like and subscribe.",
+      "measured_this_run": true,
+      "scores": {
+        "raw_reference": {
+          "wer": 0.0545,
+          "wer_percent": 5.45,
+          "substitutions": 16,
+          "deletions": 49,
+          "insertions": 9,
+          "hits": 1293,
+          "reference_words": 1358,
+          "hypothesis_words": 1318,
+          "similarity_ratio": 0.9664,
+          "similarity_percent": 96.64
+        },
+        "cleaned_reference": {
+          "wer": 0.0251,
+          "wer_percent": 2.51,
+          "substitutions": 16,
+          "deletions": 8,
+          "insertions": 9,
+          "hits": 1293,
+          "reference_words": 1317,
+          "hypothesis_words": 1318,
+          "similarity_ratio": 0.9814,
+          "similarity_percent": 98.14
+        }
+      },
+      "known_errors": [
+        {
+          "case": "'lemmatization' spelt 'Lematization'",
+          "premise_supported_by_reference": true,
+          "reference_form_present": false,
+          "wrong_form_present": false,
+          "status": "neither form found"
+        },
+        {
+          "case": "'lem' (reference uses the short form, NOT 'lemma')",
+          "premise_supported_by_reference": true,
+          "reference_form_present": true,
+          "wrong_form_present": false,
+          "status": "matches reference"
+        },
+        {
+          "case": "'make is now a noun' heard as 'make is now now'",
+          "premise_supported_by_reference": true,
+          "reference_form_present": false,
+          "wrong_form_present": true,
+          "status": "still wrong"
+        }
+      ]
+    },
+    {
+      "model": "base",
+      "model_was_cached": true,
+      "load_seconds": 1.06,
+      "transcribe_seconds": 70.71,
+      "characters": 7006,
+      "words": 1278,
+      "normalised_words": 1313,
+      "transcript": "What is natural language processing? Well, you're doing it right now. You're listening to the words and the sentences that I'm forming, and you are forming some sort of comprehension from it. And when we ask a computer to do that, that is NLP or natural language processing. My name is Martin Keen. I'm a Master Inventor at IBM. And I've utilized NLP in a good number of my invention disclosures. NLP really has a really high utility value in all sorts of AI applications. Now, NLP starts with something called unstructured text. What is that? Well, that's just what you and I say. That's how we speak. So, for example, some unstructured text is add eggs and milk. To my shopping list. Now, you and I understand exactly what that means, but it is unstructured at least to a computer. So, what we need to do is to have a structured representation of that same information that a computer can process. Now, that might look something a bit more like this, where we have a shopping list element. And then it has sub elements within it, like an item for eggs. And an item for milk. That is an example of something that is structured. Now, the job of natural language processing is to translate between these two things. So, NLP sits right in the middle here, translating between unstructured and structured data. And when we go from unstructured here to structured this way, that's called NLU or natural language understanding. And when we go this way from structured to unstructured, that's called natural language generation or NLG. We're going to focus today primarily on going from unstructured to structured in natural language processing. Now, let's think of some use cases where NLP might be quite handy. First of all, we've got machine translation. Now, when we translate from one language to another, we need to understand the context of that sentence. It's not just the case of taking each individual word from, say, English and then translating it into another language. We need to understand the overall structure and context of what's being said. And my favorite example of this going horribly wrong is if you take the phrase, the spirit is willing, but the flesh is weak. And you translate that from English to Russian, and then you translate that Russian translation back into English, you're going to go from the spirit is willing, but the flesh is weak to something a bit more like the vodka is good, but the meat is rotten, which is really not the intended context of that sentence, whatsoever. So, NLP can help with situations like that. Now, the second kind of use case that I like to mention relates to virtual assistance. And also to things like chatbots. Now, a virtual assistant, that's something like Siri or Alexa on your phone that is taking human utterances and deriving a command to execute based upon that. And a chatbot is something similar except in written language, and that's taking written language and then using it to traverse a decision tree in order to take an action. NLP is very helpful there. Another use case is for sentiment analysis. Now, this is taking some text, perhaps an email message or a product review and trying to derive the sentiment that it's expressed within it. So, for example, is this product review a positive sentiment or a negative sentiment? Is it written as a serious statement or is it being sarcastic? We can use NLP to tell us. And then finally, another good example is spam detection. So, this is a case of looking at a given email message and trying to derive, is this a really email message or is it spam? And we can look for pointers within the content of the message. So, things like overused words or poor grammar or an inappropriate claim of urgency can all indicate that this is actually, perhaps, spam. So, those are some of the things that NLP can provide, but how does it work? Well, the thing with NLP is it's not like one algorithm. It's actually more like a bag of tools. And you can apply these bag of tools to be able to resolve some of these use cases. Now, the input to NLP is some unstructured text, so either some written text or spoken text that has been converted to a written text through a speech to text algorithm. Once we've got that, the first stage of NLP is called tokenization. This is about taking a string and breaking it down into chunks. So, if we consider the unstructured text we've got here, add eggs and milk to my shopping list. That's eight words. That could be eight tokens. And from here on in, we are going to work one token at a time as we traverse through this. Now, the first stage once we've got things down into tokens that we can perform is called stemming. And this is all about deriving the word stem for a given token. So, for example, running runs and ran. The word stem for all three of those is run. We're just kind of removing the prefix and the suffixes and normalizing the tense and we're getting to the word stem. But stemming doesn't work well for every token. For example, universal and university will, well, they don't really stem down to universe. For situations like that, there is another tool that we have available and that is called Lematization. And lematization takes a given token and learns its meaning through a dictionary. Definition and from there it can derive its root or its Lem. So, take better, for example, better is derived from good. So, the root or the Lem of better is good. The stem of better would be bet. So, you can see that it is significant whether we use stemming or we use Lematization for a given token. Now, next thing we can do is we can do a process called part of speech tagging. And what this is doing is for a given token is looking where that token is used within the context of a sentence. So, take the word make, for example. If I say, I'm going to make dinner, make is a verb. But if I ask you what make is your laptop, well, make is now now. So, where that token is used in the sentence matters. Part of speech tagging can help us derive that context. And then finally, another stage is named entity recognition. And what this is asking is for a given token is there an entity associated with it. For example, a token of Arizona has an entity of a US state, whereas a token of Ralph has an entity of a person's name. And these are some of the tools that we can apply in this big bag of tools that we have for NLP in order to get from this unstructured human speech through to something structured that a computer can understand. And once we've done that, then we can apply that structured data to all sorts of AI applications. Now, there's obviously a lot more to it than this. And I've included some links in the description if you'd like to know more. But hopefully this made some sense and that you were able to process some of the natural language that I've shared today. Thanks for watching. If you have questions, please drop us a line below. And if you want to see more videos like this in the future, please like and subscribe.",
+      "scores": {
+        "raw_reference": {
+          "wer": 0.0457,
+          "wer_percent": 4.57,
+          "substitutions": 11,
+          "deletions": 48,
+          "insertions": 3,
+          "hits": 1299,
+          "reference_words": 1358,
+          "hypothesis_words": 1313,
+          "similarity_ratio": 0.9727,
+          "similarity_percent": 97.27
+        },
+        "cleaned_reference": {
+          "wer": 0.0159,
+          "wer_percent": 1.59,
+          "substitutions": 11,
+          "deletions": 7,
+          "insertions": 3,
+          "hits": 1299,
+          "reference_words": 1317,
+          "hypothesis_words": 1313,
+          "similarity_ratio": 0.9878,
+          "similarity_percent": 98.78
+        }
+      },
+      "known_errors": [
+        {
+          "case": "'lemmatization' spelt 'Lematization'",
+          "premise_supported_by_reference": true,
+          "reference_form_present": false,
+          "wrong_form_present": true,
+          "status": "still wrong"
+        },
+        {
+          "case": "'lem' (reference uses the short form, NOT 'lemma')",
+          "premise_supported_by_reference": true,
+          "reference_form_present": true,
+          "wrong_form_present": false,
+          "status": "matches reference"
+        },
+        {
+          "case": "'make is now a noun' heard as 'make is now now'",
+          "premise_supported_by_reference": true,
+          "reference_form_present": false,
+          "wrong_form_present": true,
+          "status": "still wrong"
+        }
+      ],
+      "measured_this_run": false
+    },
+    {
+      "model": "small",
+      "model_was_cached": true,
+      "load_seconds": 3.07,
+      "transcribe_seconds": 179.73,
+      "characters": 7039,
+      "words": 1285,
+      "normalised_words": 1323,
+      "transcript": "What is natural language processing? Well, you're doing it right now. You're listening to the words and the sentences that I'm forming, and you are forming some sort of comprehension from it. And when we ask a computer to do that, that is NLP on natural language processing. My name is Martin Keane. I'm a master inventor at IBM, and I've utilized NLP in a good number of my invention disclosures. NLP really has a really high utility value in all sorts of AI applications. Now, NLP starts with something called unstructured text. What is that? Well, that's just what you and I say. That's how we speak. So, for example, some unstructured text is add eggs and milk. To my shopping list. Now, you and I understand exactly what that means, but it is unstructured, at least to a computer. So, what we need to do is to have a structured representation of that same information that a computer can process. Now, that might look something a bit more like this, where we have a shopping list element. And then it has sub elements within it, like an item for eggs and an item for milk. That is an example of something that is structured. Now, the job of natural language processing is to translate between these two things. So, NLP sits right in the middle here, translating between unstructured and structured data. And when we go from unstructured here to structured this way, that's called NLU, or Natural Language Understanding. And when we go this way from structured to structured, that's called Natural Language Generation, or NLG. We're going to focus today primarily on going from unstructured to structured in natural language processing. Now, let's think of some use cases where NLP might be quite handy. First of all, we've got machine translation. Now, we're going to focus on the NLU. When we translate from one language to another, we need to understand the context of that sentence. It's not just a case of taking each individual word from, say, English, and then translating it into another language. We need to understand the overall structure and context of what's being said. And my favorite example of this going horribly wrong is if you take the phrase, the spirit is willing, but the flesh is weak, and you translate that from English to Russian, and then you translate that Russian translation back into English, you're going to go from the spirit is willing, but the flesh is weak, to something a bit more like the vodka is good, but the meat is rotten, which is really not the intended context of that sentence whatsoever. So NLP can help with situations like that. Now, the second kind of use case that I like to mention relates to virtual assistants and also to things like chatbots. Now, a virtual assistant, that's something like Siri or Alexa on your phone, that is taking human utterances and deriving a command to execute based upon that. And a chatbot is something similar, except in written language, and that's taking written language and then using it to traverse a decision tree in order to take an action. NLP is very helpful there. Another use case is for sentiment analysis. Now, this is taking some text, perhaps an email message or a product review, and trying to derive the sentiment that it's expressed within it. So for example, is this product review a positive sentiment or a negative sentiment? Is it written as a serious statement or is it being sarcastic? We can use NLP to tell us. And then finally, another good example is spam detection. So this is a case of looking at a given email message and trying to drive, is this a real email message or is it spam? And we can look for pointers within the content of the message. So things like overused words or poor grammar or an inappropriate claim of urgency can all indicate that this is actually perhaps spam. So those are some of the things that NLP can provide, but how does it work? Well, the thing with NLP is it's not like one algorithm. It's actually more like a bag of tools, and you can apply these bag of tools to be able to resolve some of these use cases. Now, the input to NLP is some unstructured text, so either some written text or spoken text that has been converted to written text through a speech to text algorithm. Once we've got that, the first stage of NLP is called tokenization. This is about taking a string and breaking it down into chunks. So if we consider the unstructured text we've got here, add eggs and milk to my shopping list, that's eight words, that could be eight tokens. And from here on in, we are going to work one token at a time as we traverse through this. Now, the first stage, once we've got things down into tokens that we can perform, is called stemming. And this is all about deriving the word stem for a given token. So for example, running, runs, and ran, the word stem for all three of those is run. We're just kind of removing the prefix and the suffixes and normalizing the tense, and we're getting to the word stem. But stemming doesn't work well for every token. For example, universal and university will, well, they don't really stem down to universe. For situations like that, there is another tool that we have available, and that is called lemmatization. And lemmatization takes a given token and learns its meaning through a dictionary definition, and from there it can derive its root or its lem. So take better, for example, better is derived from good, so the root or the lem of better is good. The stem of better would be bet. So you can see that it is significant whether we use stemming or we use lemmatization for a given token. Now, next thing we can do is we can do a process called part of speech tagging. And what this is doing is for a given token, it's looking where that token is used within the context of a sentence. So take the word make, for example. If I say I'm going to make dinner, make is a verb. But if I ask you what make is your laptop, well, make is now a noun. So where that token is used in the sentence matters, part of speech tagging can help us derive that context. And then finally, another stage is named entity recognition. And what this is asking is for a given token, is there an entity associated with it? For example, a token of Arizona has an entity of a U.S. state, whereas a token of Ralph has an entity of a person's name. And these are some of the tools that we can apply in this big bag of tools that we have for NLP in order to get from this unstructured human speech through to something structured that a computer can understand. And once we've done that, then we can apply that structured data to all sorts of AI applications. Now, there's obviously a lot more to it than this, and I've included some links in the description if you'd like to know more. But hopefully this made some sense and that you were able to process some of the natural language that I've shared today. Thanks for watching. If you have questions, please drop us a line below. And if you want to see more videos like this in the future, please like and subscribe.",
+      "scores": {
+        "raw_reference": {
+          "wer": 0.042,
+          "wer_percent": 4.2,
+          "substitutions": 10,
+          "deletions": 41,
+          "insertions": 6,
+          "hits": 1307,
+          "reference_words": 1358,
+          "hypothesis_words": 1323,
+          "similarity_ratio": 0.9758,
+          "similarity_percent": 97.58
+        },
+        "cleaned_reference": {
+          "wer": 0.0137,
+          "wer_percent": 1.37,
+          "substitutions": 4,
+          "deletions": 4,
+          "insertions": 10,
+          "hits": 1309,
+          "reference_words": 1317,
+          "hypothesis_words": 1323,
+          "similarity_ratio": 0.9917,
+          "similarity_percent": 99.17
+        }
+      },
+      "known_errors": [
+        {
+          "case": "'lemmatization' spelt 'Lematization'",
+          "premise_supported_by_reference": true,
+          "reference_form_present": true,
+          "wrong_form_present": false,
+          "status": "matches reference"
+        },
+        {
+          "case": "'lem' (reference uses the short form, NOT 'lemma')",
+          "premise_supported_by_reference": true,
+          "reference_form_present": true,
+          "wrong_form_present": false,
+          "status": "matches reference"
+        },
+        {
+          "case": "'make is now a noun' heard as 'make is now now'",
+          "premise_supported_by_reference": true,
+          "reference_form_present": true,
+          "wrong_form_present": false,
+          "status": "matches reference"
+        }
+      ],
+      "measured_this_run": false
+    },
+    {
+      "model": "medium",
+      "ok": true,
+      "model_was_cached": false,
+      "load_seconds": 160.32,
+      "transcribe_seconds": 409.12,
+      "characters": 6977,
+      "words": 1276,
+      "normalised_words": 1313,
+      "transcript": "What is natural language processing? Well, you're doing it right now. You're listening to the words and the sentences that I'm forming and you are forming some sort of comprehension from it. And when we ask a computer to do that, that is NLP or natural language processing. My name is Martin Keane. I'm a master inventor at IBM and I've utilized NLP in a good number of my invention disclosures. NLP really has a really high utility value in all sorts of AI applications. Now, NLP starts with something called unstructured text. What is that? Well, that's just what you and I say. That's how we speak. So for example, some unstructured text is add eggs and milk to my shopping list. Now, you and I understand exactly what that means, but it is unstructured, at least to a computer. So what we need to do is to have a structured representation of that same information that a computer can process. Now that might look something a bit more like this, where we have a shopping list element and then it has sub elements within it like an item for eggs and an item for milk. That is an example of something that is structured. Now the job of natural language processing is to translate between these two things. So NLP sits right in the middle here, translating between unstructured and structured data. And when we go from unstructured here to structured this way, that's called NLU or natural language understanding. And when we go this way from structured to unstructured, that's called natural language generation or NLG. We're going to focus today primarily on going from unstructured to structured in natural language processing. Now let's think of some use cases where NLP might be quite handy. First of all, we've got machine translation. Now when we translate from one language to another, we need to understand the context of that sentence. It's not just a case of taking each individual word from say English and then translating it into another language. We need to understand the overall structure and context of what's being said. And my favorite example of this going horribly wrong is if you take the phrase, the spirit is willing, but the flesh is weak, and you translate that from English to Russian, and then you translate that Russian translation back into English, you're going to go from the spirit is willing, but the flesh is weak, to something a bit more like the vodka is good, but the meat is rotten, which is really not the intended context of that sentence whatsoever. So NLP can help with situations like that. Now the second kind of use case that I like to mention relates to virtual assistants and also to things like chatbots. Now a virtual assistant, that's something like Siri or Alexa on your phone that is taking human utterances and deriving a command to execute based upon that. And a chatbot is something similar except in written language, and that's taking written language and then using it to traverse a decision tree in order to take an action. NLP is very helpful there. Another use case is for sentiment analysis. Now this is taking some text, perhaps an email message or a product review, and trying to derive the sentiment that is expressed within it. So for example, is this product review a positive sentiment or a negative sentiment? Is it written as a serious statement or is it being sarcastic? We can use NLP to tell us. And then finally, another good example is spam detection. So this is a case of looking at a given email message and trying to derive, is this a real email message or is it spam? And we can look for pointers within the content of the message. So things like overused words or poor grammar or an inappropriate claim of urgency can all indicate that this is actually perhaps spam. So those are some of the things that NLP can provide, but how does it work? Well, the thing with NLP is it's not like one algorithm. It's actually more like a bag of tools, and you can apply these bag of tools to be able to resolve some of these use cases. Now the input to NLP is some unstructured text, so either some written text or spoken text that has been converted to written text through a speech-to-text algorithm. Once we've got that, the first stage of NLP is called tokenization. This is about taking a string and breaking it down into chunks. So if we consider the unstructured text we've got here, add eggs and milk to my shopping list, that's eight words, that could be eight tokens. And from here on in, we are going to work one token at a time as we traverse through this. Now the first stage, once we've got things down into tokens that we can perform, is called stemming. And this is all about deriving the word stem for a given token. So for example, running, runs, and ran, the word stem for all three of those is run. We're just kind of removing the prefix and the suffixes and normalizing the tense, and we're getting to the word stem. But stemming doesn't work well for every token. For example, universal and university, well, they don't really stem down to universe. For situations like that, there is another tool that we have available, and that is called lemmatization. And lemmatization takes a given token and learns its meaning through a dictionary definition, and from there, it can derive its root or its lem. So take better, for example. Better is derived from good, so the root or the lem of better is good. The stem of better would be bet. So you can see that it is significant whether we use stemming or we use lemmatization for a given token. Now next thing we can do is we can do a process called part of speech tagging. And what this is doing is for a given token, it's looking where that token is used within the context of a sentence. So take the word make, for example. If I say I'm going to make dinner, make is a verb. But if I ask you what make is your laptop, well, make is now a noun. So where that token is used in the sentence matters. Part of speech tagging can help us derive that context. And then finally, another stage is named entity recognition. And what this is asking is for a given token, is there an entity associated with it? So for example, a token of Arizona has an entity of a US state, whereas a token of Ralph has an entity of a person's name. And these are some of the tools that we can apply in this big bag of tools that we have for NLP in order to get from this unstructured human speech through to something structured that a computer can understand. And once we've done that, then we can apply that structured data to all sorts of AI applications. Now there's obviously a lot more to it than this and I've included some links in the description if you'd like to know more. But hopefully this made some sense and that you were able to process some of the natural language that I've shared today. Thanks for watching. If you have questions, please drop us a line below. And if you want to see more videos like this in the future, please like and subscribe.",
+      "measured_this_run": true,
+      "scores": {
+        "raw_reference": {
+          "wer": 0.0376,
+          "wer_percent": 3.76,
+          "substitutions": 6,
+          "deletions": 45,
+          "insertions": 0,
+          "hits": 1307,
+          "reference_words": 1358,
+          "hypothesis_words": 1313,
+          "similarity_ratio": 0.9787,
+          "similarity_percent": 97.87
+        },
+        "cleaned_reference": {
+          "wer": 0.0068,
+          "wer_percent": 0.68,
+          "substitutions": 5,
+          "deletions": 4,
+          "insertions": 0,
+          "hits": 1308,
+          "reference_words": 1317,
+          "hypothesis_words": 1313,
+          "similarity_ratio": 0.9947,
+          "similarity_percent": 99.47
+        }
+      },
+      "known_errors": [
+        {
+          "case": "'lemmatization' spelt 'Lematization'",
+          "premise_supported_by_reference": true,
+          "reference_form_present": true,
+          "wrong_form_present": false,
+          "status": "matches reference"
+        },
+        {
+          "case": "'lem' (reference uses the short form, NOT 'lemma')",
+          "premise_supported_by_reference": true,
+          "reference_form_present": true,
+          "wrong_form_present": false,
+          "status": "matches reference"
+        },
+        {
+          "case": "'make is now a noun' heard as 'make is now now'",
+          "premise_supported_by_reference": true,
+          "reference_form_present": true,
+          "wrong_form_present": false,
+          "status": "matches reference"
+        }
+      ]
+    }
+  ]
+}

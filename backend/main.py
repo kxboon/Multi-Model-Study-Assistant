@@ -29,7 +29,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from backend.ingest import ingest_file
-from backend.retrieve import query_rag, ask_ollama
+from backend.retrieve import query_rag, ask_ollama, log_answer
 # Reuse the retrieval module's existing collection handle for /sessions so we
 # don't open a second ChromaDB client against the same store.
 from backend.retrieve import _collection
@@ -621,6 +621,11 @@ def query_endpoint(req: QueryRequest):
             status_code=503,
             detail="Ollama is not running. Start it with: ollama serve",
         )
+
+    # Record what the model actually replied, next to the chunks it was given.
+    # query_rag wrote the record but could not fill this in — it retrieves and
+    # returns before generation happens. log_answer never raises.
+    log_answer(rag_result.get("debug_id"), answer)
 
     # --- Learning signal: how the student sounds when asking ---------------
     # Entirely best-effort. The answer is already generated at this point, so

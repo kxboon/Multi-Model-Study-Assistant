@@ -39,6 +39,12 @@ _embedder = Embedder()
 # ---------------------------------------------------------------------------
 # ChromaDB persistent client — keeps the vector store between restarts
 # ---------------------------------------------------------------------------
+# Ingest-time dump of every chunk before embedding. A module constant rather
+# than a literal inside _store_chunks so tests can redirect it — otherwise a
+# test run appends synthetic fixture chunks to the real file, which is used as
+# evidence for report claims. Mirrors retrieve.DEBUG_PATH.
+CHUNKS_DEBUG_PATH = Path("chunks_debug.json")
+
 CHROMA_PATH = os.getenv("CHROMA_PATH", "./vectorstore/chroma_db")
 # Derived from the active embedding model, so ingest and retrieve always agree
 # on which collection holds vectors of the dimensionality they produce.
@@ -142,8 +148,8 @@ def _store_chunks(chunks: list, metadatas: list) -> int:
     if not chunks:
         return 0
 
-    print(f"[CHUNKS] {len(chunks)} chunk(s) — saving to chunks_debug.json")
-    debug_path = Path("chunks_debug.json")
+    print(f"[CHUNKS] {len(chunks)} chunk(s) — saving to {CHUNKS_DEBUG_PATH}")
+    debug_path = CHUNKS_DEBUG_PATH
     try:
         existing = json.loads(debug_path.read_text(encoding="utf-8")) if debug_path.exists() else []
     except (json.JSONDecodeError, ValueError):
