@@ -1182,3 +1182,129 @@ checks.
 | Establish whether the card-count parameter is ignored by the model or not reaching the prompt | Before user study |
 | Widen retrieval for larger requested deck sizes | Bucket C |
 | Compare self-rated recall against inferred sentiment on the same modules, as a test of whether text-based affect detection transfers to a terse query interface | Bucket C or F |
+
+# Bucket B — Task 6: Per-topic confidence aggregation
+
+**Scope:** Aggregate the stored signals by topic and surface them in the
+interface.
+
+**Status:** Complete. Bucket B's build tasks are finished.
+
+---
+
+## 1. Design decision: the three signal types are not blended
+
+The system now records three kinds of signal, and they differ in what they
+actually measure:
+
+| Signal | What it is | Reliability |
+|--------|-----------|-------------|
+| Quiz result | Whether the student picked the option the model keyed as correct | Objective, but only as good as the keying — task 4 measured 9/10 on clean source and 2/5 on OCR-degraded source |
+| Flashcard rating | The student's own judgement of whether they recalled a definition | Honest but self-reported; subject to the illusion-of-competence effect |
+| Question sentiment | Affect inferred from the wording of a question | Weakest — a proxy for a construct it does not directly measure, and sparse, since most study questions carry no affect |
+
+Combining these into a single confidence figure was considered and rejected.
+A number averaging an inferred proxy, a model-dependent measure, and a
+self-report would not correspond to anything, and could not be defended in the
+report. They are therefore reported separately, each labelled in the interface
+with what it is: **measured**, **self-reported**, and **inferred**. The labelling
+is deliberate — the distinction has to be made in the write-up anyway, and
+building it into the interface means it cannot quietly be dropped.
+
+---
+
+## 2. The sentiment threshold
+
+Task 3 established that terse factual questions sit close to the neutral/negative
+boundary: `"what is lemmatization"` scored neutral 0.597, negative 0.375. Since
+terse queries are the most common real input, a bare label is not evidence of
+anything.
+
+Sentiment records are therefore only counted when the classifier's score is at
+least 0.6; below that they are reported as **inconclusive** rather than silently
+folded into a category. The threshold is a named constant carrying its
+justification in a comment, so the reasoning survives contact with future
+editing.
+
+The threshold is applied symmetrically to all labels. It was initially applied
+only to negative records, which was inconsistent: `neutral 0.597` is the same
+weak-evidence case as `negative 0.375` and is now treated the same way.
+
+Verified directly, since weak negatives do not occur often enough to wait for:
+
+| Input | Result |
+|-------|--------|
+| negative 0.855 | counted negative |
+| negative 0.600 (exactly at threshold) | counted negative |
+| negative 0.599 | inconclusive |
+| negative 0.375 (the task-3 case) | inconclusive |
+| unknown label | inconclusive |
+
+---
+
+## 3. Implementation notes
+
+`read_signals()` was extracted from `log_signal()` rather than duplicated, so
+both paths share one definition of how the signals file is read safely, including
+the corrupt-file guard. It also filters out non-dict entries, so a hand-edited
+file cannot break every consumer. Verified against a missing file, an empty file,
+a corrupt file, and a file containing junk entries — all degrade to an empty list
+rather than raising.
+
+An empty module returns zeroed aggregates with `accuracy_pct: null` rather than
+`0`, so "no data" cannot be misread as "0% accuracy". The interface shows an
+explicit no-activity message rather than zeros.
+
+---
+
+## 4. Interface defect found in testing
+
+The Progress tab's Refresh button crashed with `DuplicateWidgetID`: redrawing
+into an `st.empty()` slot created a button with a key already registered in that
+script run. The quiz and flashcard redraws had avoided this only incidentally,
+because their widget keys carry a card or question index.
+
+The generalisable rule: **any redraw into a slot must vary its widget keys, not
+just its content.** Fixed with a pass identifier in the key.
+
+This is the sixth interface defect found only by running the application. As in
+tasks 2, 4 and 5, the API returned correct data throughout.
+
+---
+
+## 5. Limitations
+
+**Per-subject percentages fragment across phrasings.** Topics are typed freely
+when generating a quiz or deck, so `"NLP"`, `"natural language processing"` and
+`"NLP terminology"` accumulate as separate buckets for what is arguably one
+subject. Case is normalised, which merges the trivial variants; semantic merging
+is not attempted and would require the finer-grained topic extraction deliberately
+deferred in task 3. Per-subject figures should be read as per-phrasing figures.
+
+**Quiz accuracy is not comparable across source modalities.** Task 4 and task 5
+showed keying accuracy tracks extraction quality, so a low quiz percentage on an
+image-sourced module may reflect OCR damage rather than the student's
+understanding. The aggregate does not distinguish these, and any confidence
+figure derived from quiz results should be read with the source modality in mind.
+
+**Sentiment signal is sparse.** Most questions are affectively neutral, so this
+channel contributes little unless a student writes something explicitly
+frustrated.
+
+**Aggregation is module-level**, per the task 3 decision. The subject breakdowns
+give partial finer granularity, but only for quizzes and decks, and only as
+accurately as the typed topic strings allow.
+
+**Modules created but not yet ingested into do not survive a refresh.** They live
+in browser session state until something is stored under them, so refreshing
+makes an empty module disappear. Not data loss, but it reads as such.
+
+---
+
+## 6. Deferred
+
+| Item | Where |
+|------|-------|
+| Make empty modules survive a refresh, or prevent their creation until material is added | Bucket F |
+| Semantic merging of topic strings, dependent on finer-grained topic extraction | Out of scope |
+| Compare self-rated recall against inferred sentiment on the same modules, as a test of whether text-based affect detection transfers to terse query interfaces | Bucket C or F |
