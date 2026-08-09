@@ -48,6 +48,29 @@ from pathlib import Path
 SIGNALS_PATH = os.getenv("SIGNALS_PATH", "./signals.json")
 
 
+def read_signals() -> list:
+    """Return every signal record, or [] if there are none to read.
+
+    A missing file, an empty file, or a corrupt one all yield an empty list
+    rather than an error: signals are observational, and a reader asking "how
+    is this student doing" should get "no data yet", never a crash.
+    """
+    path = Path(SIGNALS_PATH)
+
+    try:
+        records = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+    except (json.JSONDecodeError, ValueError):
+        # File exists but is empty or corrupt — start fresh rather than crashing
+        return []
+
+    if not isinstance(records, list):
+        records = [records]
+
+    # Defend against hand-edited files: anything that is not a dict is not a
+    # record, and would break every consumer downstream.
+    return [r for r in records if isinstance(r, dict)]
+
+
 def log_signal(record: dict) -> None:
     """Append one signal record to the signals JSON file.
 
@@ -63,16 +86,9 @@ def log_signal(record: dict) -> None:
     """
     record.setdefault("timestamp", datetime.now().isoformat())
 
-    path = Path(SIGNALS_PATH)
-
-    try:
-        existing = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
-    except (json.JSONDecodeError, ValueError):
-        # File exists but is empty or corrupt — start fresh rather than crashing
-        existing = []
-
-    if not isinstance(existing, list):
-        existing = [existing]
-
+    existing = read_signals()
     existing.append(record)
-    path.write_text(json.dumps(existing, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    Path(SIGNALS_PATH).write_text(
+        json.dumps(existing, indent=2, ensure_ascii=False), encoding="utf-8"
+    )

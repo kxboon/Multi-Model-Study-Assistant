@@ -8,6 +8,7 @@ Endpoints:
   POST /quiz/signals  — record per-question quiz outcomes as learning signals
   POST /flashcards    — generate a term/definition flashcard deck
   POST /flashcards/signals — record per-card self-ratings as learning signals
+  GET  /confidence    — per-signal-type aggregates for one module
   GET  /sessions      — list study modules present in the store, with chunk counts
   GET  /health        — check server + Ollama availability
 """
@@ -33,7 +34,7 @@ from backend.retrieve import query_rag, ask_ollama
 # don't open a second ChromaDB client against the same store.
 from backend.retrieve import _collection
 from backend.models.sentiment_model import SentimentModel
-from backend.signals import log_signal
+from backend.signals import log_signal, read_signals
 
 # ---------------------------------------------------------------------------
 # App setup
@@ -105,6 +106,94 @@ class FlashcardSignalsRequest(BaseModel):
     session_id: str = None
     topic: str = ""
     results: list[FlashcardResultItem] = []
+
+
+# ---------------------------------------------------------------------------
+# Confidence aggregation
+# ---------------------------------------------------------------------------
+
+# A sentiment record only counts as evidence at or above this confidence, and
+# the rule applies to EVERY label, not just negative ones. Below it the model is
+# not telling us anything usable: one terse factual question ("what is
+# lemmatization") scored neutral 0.597 while another scored negative 0.375 —
+# both are weak readings of the same kind of input, so treating the neutral one
+# as a finding while discarding the negative one would be arbitrary. Anything
+# under the threshold is reported as inconclusive.
+SENTIMENT_SCORE_THRESHOLD = 0.6
+
+
+def _pct(part: int, whole: int):
+    """Percentage to 1dp, or None when there is nothing to divide by."""
+    return round(100.0 * part / whole, 1) if whole else None
+
+
+def _aggregate_quiz(records: list) -> dict:
+    correct = sum(1 for r in records if r.get("value") == "correct")
+    return {
+        "count": len(records),
+        "correct": correct,
+        "incorrect": len(records) - correct,
+        "accuracy_pct": _pct(correct, len(records)),
+    }
+
+
+def _aggregate_flashcard(records: list) -> dict:
+    known = sum(1 for r in records if r.get("value") == "known")
+    return {
+        "count": len(records),
+        "known": known,
+        "unknown": len(records) - known,
+        "known_pct": _pct(known, len(records)),
+    }
+
+
+def _aggregate_sentiment(records: list) -> dict:
+    """Tally sentiment, holding every low-confidence reading back.
+
+    The threshold applies symmetrically: a weak neutral is no more informative
+    than a weak negative, so both land in `inconclusive`.
+    """
+    counts = {"negative": 0, "neutral": 0, "positive": 0, "inconclusive": 0}
+    for r in records:
+        label = r.get("value")
+        score = r.get("score") or 0.0
+        if label in ("negative", "neutral", "positive") \
+                and score >= SENTIMENT_SCORE_THRESHOLD:
+            counts[label] += 1
+        else:
+            # Below threshold, or a label this version does not recognise.
+            counts["inconclusive"] += 1
+    return {
+        "count": len(records),
+        **counts,
+        "score_threshold": SENTIMENT_SCORE_THRESHOLD,
+    }
+
+
+def _breakdown(records: list, field: str, aggregate) -> list:
+    """Group records by a type-specific topic field and aggregate each group.
+
+    `topic` is module-level for every signal type, so the finer-grained subject
+    a quiz or deck was actually about lives in its own field. Records without
+    that field are skipped rather than bucketed under a placeholder.
+
+    Subjects are matched case-insensitively after trimming, so "NLP" and "nlp"
+    are one bucket. LIMITATION: that is the whole of the matching. Subjects are
+    free text typed per quiz or deck, so "natural language processing" and
+    "NLP terminology" remain separate buckets even though a person would call
+    them one subject. Merging those needs semantic comparison, which is
+    deliberately not attempted — a wrong merge would silently misreport
+    mastery, which is worse than an obviously split breakdown.
+    """
+    groups: dict = {}
+    for r in records:
+        subject = (r.get(field) or "").strip().lower()
+        if subject:
+            groups.setdefault(subject, []).append(r)
+    return [
+        {"subject": subject, **aggregate(group)}
+        for subject, group in sorted(groups.items())
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -414,6 +503,47 @@ def list_sessions():
         {"session_id": sid, "chunks": n}
         for sid, n in sorted(counts.items())
     ]
+
+
+@app.get("/confidence")
+def confidence_endpoint(session_id: str = ""):
+    """Aggregate this module's learning signals, per signal type.
+
+    The three types are returned SEPARATELY and never combined into a single
+    score. They are not equally trustworthy: quiz results are measured,
+    flashcard ratings are self-reported, and sentiment is inferred by a model
+    that is domain-mismatched. Averaging them would produce a number with no
+    defensible meaning.
+
+    Returns zeroed aggregates for a module with no signals — an empty history
+    is a normal state, not an error.
+    """
+    session_id = (session_id or "").strip()
+    if not session_id:
+        raise HTTPException(
+            status_code=400,
+            detail="session_id is required. Select a module — an empty "
+                   "session_id would aggregate across all modules.",
+        )
+
+    # read_signals() absorbs a missing/empty/corrupt file into an empty list.
+    mine = [r for r in read_signals() if r.get("session_id") == session_id]
+
+    by_type: dict = {"quiz": [], "flashcard": [], "sentiment": []}
+    for r in mine:
+        by_type.setdefault(r.get("signal_type"), []).append(r)
+
+    return {
+        "session_id": session_id,
+        "total_signals": len(mine),
+        "quiz": _aggregate_quiz(by_type["quiz"]),
+        "flashcard": _aggregate_flashcard(by_type["flashcard"]),
+        "sentiment": _aggregate_sentiment(by_type["sentiment"]),
+        "by_quiz_topic": _breakdown(by_type["quiz"], "quiz_topic", _aggregate_quiz),
+        "by_flashcard_topic": _breakdown(
+            by_type["flashcard"], "flashcard_topic", _aggregate_flashcard
+        ),
+    }
 
 
 @app.post("/ingest")

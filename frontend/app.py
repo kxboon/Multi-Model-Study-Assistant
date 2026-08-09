@@ -14,6 +14,15 @@ import time
 # fail before falling back. That cost was paid on every rerun.
 API_URL = "http://127.0.0.1:8000"
 
+# Shown under each per-subject breakdown. Subjects are free text typed per quiz
+# or deck, and the backend only matches them case-insensitively, so closely
+# related wordings stay in separate rows. Saying so beats letting a split
+# breakdown read as a bug.
+SUBJECT_MATCH_NOTE = (
+    "Subjects are matched by exact wording (ignoring case). Differently worded "
+    "subjects stay separate even when they cover the same ground."
+)
+
 # ---------------------------------------------------------------------------
 # Page config
 # ---------------------------------------------------------------------------
@@ -180,6 +189,15 @@ def post_flashcard_signals(session_id: str, topic: str, results: list) -> dict:
     return resp.json()
 
 
+def fetch_confidence(session_id: str) -> dict:
+    """GET /confidence for one module. Deliberately uncached — it must reflect
+    the quiz or deck the student just finished."""
+    r = requests.get(f"{API_URL}/confidence",
+                     params={"session_id": session_id}, timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+
 # ---------------------------------------------------------------------------
 # Sidebar — status + upload + session
 # ---------------------------------------------------------------------------
@@ -327,7 +345,9 @@ st.caption(
     f"Module: **{module}** — answers are grounded only in this module's material."
 )
 
-tab_chat, tab_quiz, tab_cards = st.tabs(["💬 Chat", "📝 Quiz", "🗂️ Flashcards"])
+tab_chat, tab_quiz, tab_cards, tab_progress = st.tabs(
+    ["💬 Chat", "📝 Quiz", "🗂️ Flashcards", "📊 Progress"]
+)
 
 # ---------------------------------------------------------------------------
 # Chat tab — behaviour unchanged, only relocated inside the tab
@@ -791,3 +811,125 @@ with tab_cards:
         else:
             if draw_summary():
                 reset_deck()
+
+
+# ---------------------------------------------------------------------------
+# Progress tab — per-signal-type confidence, deliberately NOT one blended score
+# ---------------------------------------------------------------------------
+with tab_progress:
+    # Refreshing redraws this slot in place rather than calling st.rerun(),
+    # which would re-create the tab strip and bounce the user back to Chat.
+    progress_slot = st.empty()
+
+    def draw_progress(pass_id: int = 0) -> bool:
+        """Render the confidence panel. Returns True if Refresh was clicked.
+
+        `pass_id` namespaces the Refresh button's key. A redraw happens in the
+        same script run as the first draw, and reusing the key there raises
+        DuplicateWidgetID.
+        """
+        with progress_slot.container():
+            try:
+                data = fetch_confidence(module)
+            except Exception as e:
+                st.error(f"Could not load progress: {e}")
+                return False
+
+            if data["total_signals"] == 0:
+                st.info(
+                    f"No activity recorded for **{module}** yet. Take a quiz or "
+                    "work through a flashcard deck, and your results will "
+                    "appear here."
+                )
+                return st.button("Refresh", use_container_width=True,
+                                 key=f"prog_refresh_{module}_{pass_id}")
+
+            st.caption(
+                f"{data['total_signals']} signals recorded for **{module}**. "
+                "The three measures are kept separate on purpose — they are not "
+                "equally reliable, so a single blended score would be misleading."
+            )
+
+            # --- Quiz: measured ---
+            quiz_agg = data["quiz"]
+            st.subheader("📝 Quiz — measured")
+            st.caption("Marked automatically by comparing your answer to the key.")
+            if quiz_agg["count"] == 0:
+                st.markdown("_No quiz questions answered yet._")
+            else:
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Questions", quiz_agg["count"])
+                c2.metric("Correct", quiz_agg["correct"])
+                c3.metric("Accuracy", f"{quiz_agg['accuracy_pct']}%")
+                st.progress((quiz_agg["accuracy_pct"] or 0) / 100)
+
+                if data["by_quiz_topic"]:
+                    with st.expander("By quiz subject"):
+                        for row in data["by_quiz_topic"]:
+                            st.markdown(
+                                f"**{row['subject']}** — {row['correct']}/"
+                                f"{row['count']} correct ({row['accuracy_pct']}%)"
+                            )
+                        st.caption(SUBJECT_MATCH_NOTE)
+
+            st.divider()
+
+            # --- Flashcards: self-reported ---
+            fc_agg = data["flashcard"]
+            st.subheader("🗂️ Flashcards — self-reported")
+            st.caption(
+                "Based on your own 'Got it' / 'Didn't know' ratings, not on any "
+                "check of your answer."
+            )
+            if fc_agg["count"] == 0:
+                st.markdown("_No flashcards rated yet._")
+            else:
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Cards rated", fc_agg["count"])
+                c2.metric("Known", fc_agg["known"])
+                c3.metric("Known %", f"{fc_agg['known_pct']}%")
+                st.progress((fc_agg["known_pct"] or 0) / 100)
+
+                if data["by_flashcard_topic"]:
+                    with st.expander("By deck subject"):
+                        for row in data["by_flashcard_topic"]:
+                            st.markdown(
+                                f"**{row['subject']}** — {row['known']}/"
+                                f"{row['count']} known ({row['known_pct']}%)"
+                            )
+                        st.caption(SUBJECT_MATCH_NOTE)
+
+            st.divider()
+
+            # --- Sentiment: inferred ---
+            s_agg = data["sentiment"]
+            st.subheader("💬 Question tone — inferred")
+            st.caption(
+                "Guessed by a sentiment model from how your questions are "
+                "phrased. The weakest of the three: it never sees whether you "
+                "understood anything."
+            )
+            if s_agg["count"] == 0:
+                st.markdown("_No questions asked yet._")
+            else:
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Questions", s_agg["count"])
+                c2.metric("Negative", s_agg["negative"])
+                c3.metric("Neutral", s_agg["neutral"])
+                c4.metric("Positive", s_agg["positive"])
+                if s_agg["inconclusive"]:
+                    st.caption(
+                        f"{s_agg['inconclusive']} question(s) scored below the "
+                        f"{s_agg['score_threshold']} confidence threshold and "
+                        "are not counted, whatever label they were given — at "
+                        "that confidence the model does not reliably tell "
+                        "frustration from a plainly worded question."
+                    )
+
+            st.divider()
+            return st.button("Refresh", use_container_width=True,
+                             key=f"prog_refresh_{module}_{pass_id}")
+
+    if draw_progress(0):
+        # Redraw in place with fresh data; no st.rerun(), so the tab stays put.
+        draw_progress(1)
