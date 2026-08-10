@@ -185,6 +185,34 @@ def log_answer(debug_id: str, answer: str) -> bool:
         return False
 
 
+def build_rag_prompt(question: str, context_chunks: list) -> str:
+    """Build the grounded study-assistant prompt from retrieved chunks.
+
+    Extracted from ask_ollama() so evaluation harnesses can send the exact
+    production prompt to other models without copying the wording — a copy
+    would silently drift the day this is edited, and any model comparison
+    built on a stale prompt measures the wrong thing.
+
+    The instructions restrict the model to the supplied notes, which is what
+    keeps answers grounded in the student's own material.
+    """
+    notes_block = "\n\n---\n\n".join(context_chunks)
+    return (
+        "You are a study assistant. Answer the question using ONLY the notes "
+        "from the student's lectures provided below. Do not use any knowledge "
+        "outside these notes, and do not invent details.\n\n"
+        "Be thorough and detailed: include all relevant facts, definitions, "
+        "examples, and explanations found in the notes. Preserve specific terms, "
+        "names, numbers, and wording from the notes rather than paraphrasing them "
+        "away. Do NOT over-summarise or condense — it is better to be complete "
+        "than brief. If the notes contain the information, report it in full. "
+        "Only state that the notes do not cover something if it is genuinely absent.\n\n"
+        f"Notes:\n{notes_block}\n\n"
+        f"Question: {question}\n\n"
+        "Detailed answer based on the notes:"
+    )
+
+
 def ask_ollama(
     question: str,
     context_chunks: list,
@@ -208,22 +236,7 @@ def ask_ollama(
     """
     model = model or OLLAMA_MODEL
 
-    notes_block = "\n\n---\n\n".join(context_chunks)
-
-    prompt = (
-        "You are a study assistant. Answer the question using ONLY the notes "
-        "from the student's lectures provided below. Do not use any knowledge "
-        "outside these notes, and do not invent details.\n\n"
-        "Be thorough and detailed: include all relevant facts, definitions, "
-        "examples, and explanations found in the notes. Preserve specific terms, "
-        "names, numbers, and wording from the notes rather than paraphrasing them "
-        "away. Do NOT over-summarise or condense — it is better to be complete "
-        "than brief. If the notes contain the information, report it in full. "
-        "Only state that the notes do not cover something if it is genuinely absent.\n\n"
-        f"Notes:\n{notes_block}\n\n"
-        f"Question: {question}\n\n"
-        "Detailed answer based on the notes:"
-    )
+    prompt = build_rag_prompt(question, context_chunks)
 
     payload = {
         "model": model,
