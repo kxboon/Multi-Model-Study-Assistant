@@ -59,9 +59,23 @@ _sentiment = SentimentModel()
 # Request / Response schemas
 # ---------------------------------------------------------------------------
 
+# NOTE on `str | None = None` throughout these models.
+#
+# Under Pydantic v2, `x: str = None` declares a field of type str whose default
+# happens to be None. Defaults are not validated, so OMITTING the key works —
+# but sending it explicitly as JSON null is a type error and FastAPI rejects the
+# whole request with 422 before the endpoint body runs.
+#
+# The frontend builds payloads with dict literals, so optional keys are always
+# present and carry null rather than being absent. That combination silently
+# lost 10 of 11 flashcard ratings: every card without provenance sent
+# "source_file": null and was rejected at the HTTP boundary, where none of the
+# endpoints' per-item failure isolation could see it. Any field the frontend may
+# send as null must therefore be Optional in the annotation, not merely defaulted.
+
 class QueryRequest(BaseModel):
     question: str
-    session_id: str = None
+    session_id: str | None = None
     n_results: int = 5
 
 
@@ -71,7 +85,7 @@ class QueryResponse(BaseModel):
 
 
 class QuizRequest(BaseModel):
-    session_id: str = None
+    session_id: str | None = None
     topic: str = ""
     n_questions: int = 5
 
@@ -80,17 +94,17 @@ class QuizResultItem(BaseModel):
     """One marked question, as scored by the frontend."""
     question: str
     correct: bool
-    source_file: str = None
+    source_file: str | None = None
 
 
 class QuizSignalsRequest(BaseModel):
-    session_id: str = None
+    session_id: str | None = None
     topic: str = ""
     results: list[QuizResultItem] = []
 
 
 class FlashcardRequest(BaseModel):
-    session_id: str = None
+    session_id: str | None = None
     topic: str = ""
     n_cards: int = 10
 
@@ -99,11 +113,11 @@ class FlashcardResultItem(BaseModel):
     """One card as self-rated by the student."""
     term: str
     known: bool
-    source_file: str = None
+    source_file: str | None = None
 
 
 class FlashcardSignalsRequest(BaseModel):
-    session_id: str = None
+    session_id: str | None = None
     topic: str = ""
     results: list[FlashcardResultItem] = []
 
@@ -226,15 +240,46 @@ def _ollama_generate(prompt: str, model: str = None) -> str:
     return response.json().get("response", "")
 
 
+# Delimiter for the numbered source chunks in generation prompts.
+#
+# It must NOT be bracketed. The original "[CHUNK 3]" collided with IEEE-style
+# citation markers in academic PDFs: given a survey paper whose retrieved text
+# carried 77 bracketed references spanning [104]-[279], the model cited those
+# instead of the chunk labels and returned source indices of 211, 212, 214, 215,
+# 216, 218 and 237 for a 10-chunk prompt. Every one of those is a literal
+# citation marker in the notes. _coerce_source_index rejected them all, which is
+# correct, but the result was flashcards with no provenance — 10 of 11 in one
+# deck. Corpora without bracketed citations were unaffected, which is why it
+# looked intermittent.
+SOURCE_LABEL = "=== SOURCE {i} ==="
+
+
+def _number_chunks(chunks: list) -> str:
+    """Label each chunk with a delimiter no source document is likely to use."""
+    return "\n\n".join(
+        f"{SOURCE_LABEL.format(i=i)}\n{text}" for i, text in enumerate(chunks)
+    )
+
+
+def _source_index_rules(n_chunks: int) -> str:
+    """Shared wording constraining source_index to the labels actually present."""
+    return (
+        f"- source_index must be one of the SOURCE numbers above: an integer "
+        f"from 0 to {n_chunks - 1} inclusive\n"
+        "- never copy a bracketed number such as [211] out of the note text. "
+        "Those are the source document's own citation markers, not source "
+        "numbers, and they are not valid here\n"
+    )
+
+
 def _build_quiz_prompt(topic: str, chunks: list, n_questions: int) -> str:
     """Build the structured MCQ prompt, with the source chunks numbered.
 
     The chunks are numbered so the model can cite which one each question came
     from, which is what gives the frontend its provenance display.
     """
-    numbered = "\n\n".join(
-        f"[CHUNK {i}]\n{text}" for i, text in enumerate(chunks)
-    )
+    numbered = _number_chunks(chunks)
+    last = len(chunks) - 1
 
     return (
         "You are writing a multiple-choice quiz from a student's own lecture "
@@ -247,15 +292,17 @@ def _build_quiz_prompt(topic: str, chunks: list, n_questions: int) -> str:
         '  "question": string\n'
         '  "options": array of exactly 4 distinct strings\n'
         '  "correct_index": integer 0-3, indexing into "options"\n'
-        '  "source_chunk_index": integer, the [CHUNK n] the question came from\n\n'
+        f'  "source_index": integer from 0 to {last}, the number of the '
+        "=== SOURCE n === section the question came from\n\n"
         "Required shape:\n"
         '[{"question": "...", "options": ["A", "B", "C", "D"], '
-        '"correct_index": 2, "source_chunk_index": 0}]\n\n'
+        '"correct_index": 2, "source_index": 0}]\n\n'
         "Rules:\n"
         "- exactly 4 options per question\n"
         "- exactly one option is correct\n"
         "- the three wrong options must be plausible but wrong per the notes\n"
         "- do not repeat a question\n"
+        + _source_index_rules(len(chunks))
     )
 
 
@@ -265,9 +312,8 @@ def _build_flashcard_prompt(topic: str, chunks: list, n_cards: int) -> str:
     Fronts are terms, not questions — that keeps flashcards distinct from the
     quiz, which is the feature that asks questions.
     """
-    numbered = "\n\n".join(
-        f"[CHUNK {i}]\n{text}" for i, text in enumerate(chunks)
-    )
+    numbered = _number_chunks(chunks)
+    last = len(chunks) - 1
 
     return (
         "You are making revision flashcards from a student's own lecture "
@@ -283,14 +329,16 @@ def _build_flashcard_prompt(topic: str, chunks: list, n_cards: int) -> str:
         "code fences. Each element must be an object with exactly these keys:\n"
         '  "term": string, the front of the card\n'
         '  "definition": string, the back of the card\n'
-        '  "source_chunk_index": integer, the [CHUNK n] the card came from\n\n'
+        f'  "source_index": integer from 0 to {last}, the number of the '
+        "=== SOURCE n === section the card came from\n\n"
         "Required shape:\n"
         '[{"term": "Tokenization", "definition": "Breaking a string of text '
-        'into individual chunks called tokens.", "source_chunk_index": 0}]\n\n'
+        'into individual chunks called tokens.", "source_index": 0}]\n\n'
         "Rules:\n"
         "- the term is a noun phrase, never a question\n"
         "- the definition is one or two sentences, drawn from the notes\n"
         "- do not repeat a term\n"
+        + _source_index_rules(len(chunks))
     )
 
 
@@ -309,13 +357,19 @@ def _loads_lenient(text: str):
 
 
 def _coerce_source_index(obj, n_chunks: int):
-    """Read source_chunk_index, or None if absent/unusable.
+    """Read source_index, or None if absent/unusable.
 
-    Provenance is nice-to-have, not load-bearing: a bad or missing chunk index
-    degrades to "no source shown" rather than dropping the whole item.
+    Provenance is nice-to-have, not load-bearing: a bad or missing source index
+    degrades to "no source shown" rather than dropping the whole item. The range
+    check is what stands between a hallucinated index and an IndexError in
+    _attach_provenance, so it must stay.
+
+    "source_chunk_index" is accepted as a fallback: it is the name earlier
+    prompts used, and a model that has seen the old phrasing may still emit it.
     """
+    raw = obj.get("source_index", obj.get("source_chunk_index"))
     try:
-        source_index = int(obj.get("source_chunk_index"))
+        source_index = int(raw)
     except (TypeError, ValueError):
         return None
     return source_index if 0 <= source_index < n_chunks else None
@@ -347,7 +401,7 @@ def _validate_quiz_item(obj, n_chunks: int):
         "question": question.strip(),
         "options": options,
         "correct_index": correct_index,
-        "source_chunk_index": _coerce_source_index(obj, n_chunks),
+        "source_index": _coerce_source_index(obj, n_chunks),
     }, None
 
 
@@ -371,7 +425,7 @@ def _validate_flashcard(obj, n_chunks: int):
     return {
         "term": term.strip(),
         "definition": definition.strip(),
-        "source_chunk_index": _coerce_source_index(obj, n_chunks),
+        "source_index": _coerce_source_index(obj, n_chunks),
     }, None
 
 
@@ -456,7 +510,7 @@ def _attach_provenance(items: list, chunks: list, metadatas: list) -> None:
     Shared by /quiz and /flashcards so both show provenance the same way.
     """
     for item in items:
-        idx = item["source_chunk_index"]
+        idx = item["source_index"]
         meta = metadatas[idx] if idx is not None else {}
         item["source_chunk_text"] = chunks[idx] if idx is not None else None
         item["source_file"] = meta.get("source_file")
