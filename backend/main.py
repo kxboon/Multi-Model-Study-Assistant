@@ -300,7 +300,13 @@ def _build_quiz_prompt(topic: str, chunks: list, n_questions: int) -> str:
         "Rules:\n"
         "- exactly 4 options per question\n"
         "- exactly one option is correct\n"
-        "- the three wrong options must be plausible but wrong per the notes\n"
+        "- the correct option must be directly supported by the notes above — "
+        "if the notes do not state an answer, do not write the question\n"
+        "- the three wrong options must be plausible but wrong per the notes, "
+        "and must use terms or concepts that actually appear in the notes. Do "
+        "not invent a plausible-sounding contrast term that the notes never "
+        "mention — e.g. if the notes discuss \"overfitting\" but never say "
+        "\"underfitting\", do not offer \"underfitting\" as an option\n"
         "- do not repeat a question\n"
         + _source_index_rules(len(chunks))
     )
@@ -389,6 +395,15 @@ def _validate_quiz_item(obj, n_chunks: int):
         got = len(options) if isinstance(options, list) else type(options).__name__
         return None, f"'options' must be a list of 4, got {got}"
     options = [str(o) for o in options]
+
+    # Four identical (or whitespace/case-variant-identical) options make the
+    # question unanswerable regardless of which index is "correct" — every
+    # option is the same choice. Compare case-insensitive and whitespace-
+    # normalised so "Overfitting " and "overfitting" still count as the same
+    # option, not four distinct ones by accident of formatting.
+    normalised = {" ".join(o.split()).lower() for o in options}
+    if len(normalised) < 4:
+        return None, "'options' contains duplicate entries — four distinct options are required"
 
     try:
         correct_index = int(obj.get("correct_index"))
