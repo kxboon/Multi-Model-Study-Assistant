@@ -23,6 +23,20 @@ SUBJECT_MATCH_NOTE = (
     "subjects stay separate even when they cover the same ground."
 )
 
+# Dev/test/evaluation modules that live in the same ChromaDB collection as real
+# study material (verification/*.py harnesses and ad hoc manual testing write
+# to the same store) but must never appear in a participant's module dropdown.
+# Exact session_id match — these are never shown, but they are not deleted, so
+# existing signals/vectorstore data tied to them stays intact.
+HIDDEN_MODULES = {
+    "Kai_Xiang_Test",
+    "eval_set",
+    "verify_audio",
+    "verify_image",
+    "migration_check",
+    "C3015 ML",
+}
+
 # ---------------------------------------------------------------------------
 # Page config
 # ---------------------------------------------------------------------------
@@ -223,8 +237,11 @@ with st.sidebar:
 
     server_sessions = fetch_sessions()
     chunk_counts = {s["session_id"]: s["chunks"] for s in server_sessions}
-    # Union the server's modules with any created this run but not yet ingested.
-    modules = sorted(set(chunk_counts) | set(st.session_state.created_modules))
+    # Union the server's modules with any created this run but not yet ingested,
+    # excluding dev/test/evaluation modules that share the same store.
+    modules = sorted(
+        (set(chunk_counts) | set(st.session_state.created_modules)) - HIDDEN_MODULES
+    )
 
     if modules:
         # Keep the selection valid if the previous module vanished server-side.

@@ -794,6 +794,17 @@ def quiz_endpoint(req: QuizRequest):
     parse_elapsed = time.perf_counter() - t_parse
     print(f"[TIMER] Quiz parsing: {parse_elapsed:.4f}s")
 
+    # The model sometimes over-produces (e.g. 11 items for a 10-item request).
+    # Cap to what was asked for so the frontend never renders more than the
+    # student requested; "parsed" below then reports what was actually
+    # returned, not what the model happened to emit before the cut.
+    if len(items) > n_questions:
+        warnings.append(
+            f"model produced {len(items)} valid items; truncated to the "
+            f"requested {n_questions}"
+        )
+        items = items[:n_questions]
+
     # Attach provenance: the chunk each question was drawn from, plus where
     # that chunk originally came from, so the frontend can show it on marking.
     _attach_provenance(items, chunks, metadatas)
@@ -930,6 +941,34 @@ def flashcards_endpoint(req: FlashcardRequest):
     )
     parse_elapsed = time.perf_counter() - t_parse
     print(f"[TIMER] Flashcard parsing: {parse_elapsed:.4f}s")
+
+    # A topic with fewer distinct concepts than n_cards makes the model repeat
+    # a term with a near-identical definition rather than admit it has run
+    # out of material. Dedupe on the term (case-insensitive), keeping the
+    # first occurrence, before capping — otherwise a deck that is genuinely
+    # smaller than requested would get padded back up with repeats.
+    seen_terms = set()
+    deduped_cards = []
+    for card in cards:
+        key = card["term"].lower()
+        if key in seen_terms:
+            continue
+        seen_terms.add(key)
+        deduped_cards.append(card)
+    if len(deduped_cards) < len(cards):
+        warnings.append(
+            f"removed {len(cards) - len(deduped_cards)} duplicate term(s)"
+        )
+    cards = deduped_cards
+
+    # Same over-production guard as /quiz, applied after dedup so it only
+    # trims genuine excess rather than cutting into distinct concepts.
+    if len(cards) > n_cards:
+        warnings.append(
+            f"model produced {len(cards)} distinct cards; truncated to the "
+            f"requested {n_cards}"
+        )
+        cards = cards[:n_cards]
 
     _attach_provenance(cards, chunks, metadatas)
 
