@@ -337,12 +337,23 @@ def _build_flashcard_prompt(topic: str, chunks: list, n_cards: int) -> str:
         '  "definition": string, the back of the card\n'
         f'  "source_index": integer from 0 to {last}, the number of the '
         "=== SOURCE n === section the card came from\n\n"
-        "Required shape:\n"
-        '[{"term": "Tokenization", "definition": "Breaking a string of text '
-        'into individual chunks called tokens.", "source_index": 0}]\n\n'
+        "Required shape (a placeholder — invent your own term and definition "
+        "from the notes above, do not reuse this one):\n"
+        '[{"term": "<a term from the notes>", "definition": "<what the notes '
+        'say it means>", "source_index": 0}]\n\n'
         "Rules:\n"
         "- the term is a noun phrase, never a question\n"
-        "- the definition is one or two sentences, drawn from the notes\n"
+        "- the definition must state what the term MEANS, not reproduce the "
+        "sentence the term happens to appear in\n"
+        "- the definition is one or two sentences, and must be complete and "
+        "self-contained: it must make sense on its own, without needing the "
+        "surrounding passage for context\n"
+        "- the definition must not include page furniture: headers, page "
+        "numbers, library/stamp text, or any other text that is not part of "
+        "the explanation\n"
+        "- if a term is named in the notes but never explained there, do not "
+        "make a card for it — choose a different term the notes DO explain. "
+        "Do not fill the gap with definitions from outside the notes\n"
         "- do not repeat a term\n"
         + _source_index_rules(len(chunks))
     )

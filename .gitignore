@@ -9,3 +9,5 @@ chunks_debug.json
 query_debug.json
 signals.json
 setup-prereqs.ps1
+make_figures.ipynb
+figures
