@@ -27,6 +27,7 @@ from backend.models.whisper_model import WhisperModel
 from backend.models.blip_model import BLIPModel
 from backend.models.ocr_model import OCRModel
 from backend.models.embedder import Embedder, collection_name
+from backend.paths import resolve_path
 
 # ---------------------------------------------------------------------------
 # Shared model instances — module-level singletons with lazy loading baked in
@@ -45,7 +46,7 @@ _embedder = Embedder()
 # evidence for report claims. Mirrors retrieve.DEBUG_PATH.
 CHUNKS_DEBUG_PATH = Path("chunks_debug.json")
 
-CHROMA_PATH = os.getenv("CHROMA_PATH", "./vectorstore/chroma_db")
+CHROMA_PATH = resolve_path("CHROMA_PATH", "./vectorstore/chroma_db")
 # Derived from the active embedding model, so ingest and retrieve always agree
 # on which collection holds vectors of the dimensionality they produce.
 COLLECTION_NAME = collection_name()

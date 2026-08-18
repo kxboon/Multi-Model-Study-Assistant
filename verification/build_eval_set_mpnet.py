@@ -24,8 +24,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import os
-
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -33,9 +31,10 @@ load_dotenv()
 import chromadb
 
 from backend.models.embedder import Embedder, collection_name
+from backend.paths import resolve_path
 
 SESSION = "eval_set"
-CHROMA_PATH = os.getenv("CHROMA_PATH", "./vectorstore/chroma_db")
+CHROMA_PATH = resolve_path("CHROMA_PATH", "./vectorstore/chroma_db")
 BATCH = 32
 
 

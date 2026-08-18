@@ -4,10 +4,11 @@ Uses Salesforce/blip-image-captioning-base via HuggingFace Transformers.
 Runs on CPU by default so no GPU is required for the FYP experiments.
 """
 
-import os
 import time
 from PIL import Image
 from transformers import BlipProcessor, BlipForConditionalGeneration
+
+from backend.paths import resolve_path
 
 
 class BLIPModel:
@@ -23,7 +24,7 @@ class BLIPModel:
         self._processor = None
         self._model = None
         # Cache directory keeps weights local so they survive re-installs
-        self._cache_dir = os.getenv("MODELS_CACHE", "./models_cache")
+        self._cache_dir = resolve_path("MODELS_CACHE", "./models_cache")
 
     def _load(self):
         """Download (once) and load the BLIP processor + model weights."""

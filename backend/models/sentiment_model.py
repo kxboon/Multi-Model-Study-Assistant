@@ -17,8 +17,9 @@ asking a question, which is logged as a learning signal (see backend/signals.py)
 NOTE: this model's labels are lowercase ("negative", not "NEGATIVE").
 """
 
-import os
 from transformers import pipeline
+
+from backend.paths import resolve_path
 
 
 class SentimentModel:
@@ -32,7 +33,7 @@ class SentimentModel:
 
     def __init__(self):
         self._pipe = None
-        self._cache_dir = os.getenv("MODELS_CACHE", "./models_cache")
+        self._cache_dir = resolve_path("MODELS_CACHE", "./models_cache")
 
     def _load(self):
         """Initialise the HuggingFace text-classification pipeline."""

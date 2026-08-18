@@ -41,11 +41,12 @@ extras:
 """
 
 import json
-import os
 from datetime import datetime
 from pathlib import Path
 
-SIGNALS_PATH = os.getenv("SIGNALS_PATH", "./signals.json")
+from backend.paths import resolve_path
+
+SIGNALS_PATH = resolve_path("SIGNALS_PATH", "./signals.json")
 
 
 def read_signals() -> list:

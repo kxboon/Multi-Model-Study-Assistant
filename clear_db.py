@@ -17,11 +17,12 @@ backend.models.embedder.collection_name). Clearing only the default would
 therefore leave those behind as orphans, so this script reports every
 study_materials* collection it finds and --all clears the lot.
 
-The CHROMA_PATH is read from .env (falls back to ./vectorstore/chroma_db).
+The CHROMA_PATH is read from .env (falls back to ./vectorstore/chroma_db),
+resolved relative to the project root regardless of the current working
+directory (see backend/paths.py).
 IMPORTANT: stop the FastAPI/uvicorn server first — it holds the DB open.
 """
 
-import os
 import shutil
 import sys
 from pathlib import Path
@@ -31,8 +32,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from backend.models.embedder import DEFAULT_COLLECTION, collection_name
+from backend.paths import resolve_path
 
-CHROMA_PATH = os.getenv("CHROMA_PATH", "./vectorstore/chroma_db")
+CHROMA_PATH = resolve_path("CHROMA_PATH", "./vectorstore/chroma_db")
 COLLECTION_NAME = collection_name()
 
 

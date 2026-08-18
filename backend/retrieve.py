@@ -21,13 +21,14 @@ load_dotenv()
 import chromadb
 
 from backend.models.embedder import Embedder, collection_name
+from backend.paths import resolve_path
 
 # ---------------------------------------------------------------------------
 # Shared singletons — lazy model loading is handled inside Embedder
 # ---------------------------------------------------------------------------
 _embedder = Embedder()
 
-CHROMA_PATH = os.getenv("CHROMA_PATH", "./vectorstore/chroma_db")
+CHROMA_PATH = resolve_path("CHROMA_PATH", "./vectorstore/chroma_db")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
 

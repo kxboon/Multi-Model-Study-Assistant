@@ -24,6 +24,8 @@ import re
 import time
 from sentence_transformers import SentenceTransformer
 
+from backend.paths import resolve_path
+
 # Base name for the vector store collection. The default model keeps this name
 # unchanged so existing data is never orphaned by the swap mechanism.
 DEFAULT_COLLECTION = "study_materials"
@@ -51,7 +53,7 @@ class Embedder:
     def __init__(self, model_id: str = None):
         self.model_id = self.resolve_model_id(model_id)
         self._model = None
-        self._cache_dir = os.getenv("MODELS_CACHE", "./models_cache")
+        self._cache_dir = resolve_path("MODELS_CACHE", "./models_cache")
 
     @classmethod
     def resolve_model_id(cls, model_id: str = None) -> str:
