@@ -32,6 +32,9 @@ CHROMA_PATH = resolve_path("CHROMA_PATH", "./vectorstore/chroma_db")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
 
+# Ollama reports its internal durations in nanoseconds.
+NS = 1e9
+
 # ---------------------------------------------------------------------------
 # Query debug log
 #
@@ -256,17 +259,41 @@ def ask_ollama(
     response.raise_for_status()
 
     full_answer = []
-    token_count = 0
+    final_chunk = {}
     for line in response.iter_lines():
         if not line:
             continue
-        import json
         chunk = json.loads(line)
         full_answer.append(chunk.get("response", ""))
-        token_count += 1
         if chunk.get("done"):
+            final_chunk = chunk
             break
 
     elapsed = time.perf_counter() - t_ollama
-    print(f"[TIMER] Ollama total: {elapsed:.2f}s (~{token_count} tokens, {token_count/elapsed:.1f} tok/s)")
+
+    # Throughput comes from Ollama's own counters on the final frame, as
+    # verification/eval_llm.py does: eval_count is the number of tokens actually
+    # generated and eval_duration the nanoseconds spent generating them.
+    # Dividing those isolates generation speed from model load, prompt
+    # evaluation and connection time, all of which sit inside the wall clock.
+    # Counting streamed frames against wall time instead understated the rate
+    # by roughly threefold (~3 tok/s reported where Ollama measured 10-13).
+    eval_count = final_chunk.get("eval_count") or 0
+    eval_duration = final_chunk.get("eval_duration") or 0
+
+    if eval_count and eval_duration:
+        gen_seconds = eval_duration / NS
+        print(
+            f"[TIMER] Ollama total: {elapsed:.2f}s wall | generation "
+            f"{eval_count} tokens in {gen_seconds:.2f}s "
+            f"({eval_count / gen_seconds:.1f} tok/s)"
+        )
+    else:
+        # Ollama omits these on some terminal frames (cancelled or load-only
+        # responses). Report the wall time rather than divide by zero.
+        print(
+            f"[TIMER] Ollama total: {elapsed:.2f}s wall | "
+            f"generation counters unavailable"
+        )
+
     return "".join(full_answer).strip()

@@ -35,6 +35,9 @@ HIDDEN_MODULES = {
     "verify_image",
     "migration_check",
     "C3015 ML",
+    # Reads like a real module, but it is 51 chunks of test_notes.pdf — the
+    # same fixture already hidden above as "C3015 ML" and "migration_check".
+    "Machine Learning",
 }
 
 # ---------------------------------------------------------------------------
