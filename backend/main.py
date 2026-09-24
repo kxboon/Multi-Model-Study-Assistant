@@ -17,6 +17,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import tempfile
 import time
 import requests
@@ -134,6 +135,28 @@ class FlashcardSignalsRequest(BaseModel):
 # as a finding while discarding the negative one would be arbitrary. Anything
 # under the threshold is reported as inconclusive.
 SENTIMENT_SCORE_THRESHOLD = 0.6
+
+
+def _print_raw(tag: str, raw: str) -> None:
+    """Print a model's raw output without letting the print itself fail.
+
+    Logged in full so a parse failure can always be diagnosed after the fact.
+
+    stdout falls back to the locale encoding (cp1252 on Windows) whenever it is
+    redirected to a file rather than attached to a console, so any character the
+    model emits outside that set - a Greek letter, an arrow, an emoji - raises
+    UnicodeEncodeError. That exception used to escape the endpoint and reach the
+    participant as a 500 even though generation had already succeeded. A debug
+    print must never be able to fail a request, so unencodable characters are
+    replaced instead of raising.
+    """
+    body = (f"[{tag} RAW] ---- begin model output ----\n{raw}\n"
+            f"[{tag} RAW] ---- end model output ----")
+    try:
+        print(body)
+    except UnicodeEncodeError:
+        enc = getattr(sys.stdout, "encoding", None) or "ascii"
+        print(body.encode(enc, errors="replace").decode(enc, errors="replace"))
 
 
 def _pct(part: int, whole: int):
@@ -809,9 +832,7 @@ def quiz_endpoint(req: QuizRequest):
     gen_elapsed = time.perf_counter() - t_gen
     print(f"[TIMER] Quiz generation (Ollama): {gen_elapsed:.2f}s "
           f"({len(raw)} chars)")
-    # Logged in full so a parse failure can always be diagnosed after the fact.
-    print(f"[QUIZ RAW] ---- begin model output ----\n{raw}\n"
-          f"[QUIZ RAW] ---- end model output ----")
+    _print_raw("QUIZ", raw)
 
     t_parse = time.perf_counter()
     items, warnings = _parse_items(
@@ -958,8 +979,7 @@ def flashcards_endpoint(req: FlashcardRequest):
     gen_elapsed = time.perf_counter() - t_gen
     print(f"[TIMER] Flashcard generation (Ollama): {gen_elapsed:.2f}s "
           f"({len(raw)} chars)")
-    print(f"[FLASHCARD RAW] ---- begin model output ----\n{raw}\n"
-          f"[FLASHCARD RAW] ---- end model output ----")
+    _print_raw("FLASHCARD", raw)
 
     t_parse = time.perf_counter()
     cards, warnings = _parse_items(

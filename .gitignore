@@ -11,3 +11,7 @@ signals.json
 setup-prereqs.ps1
 make_figures.ipynb
 figures
+logs
+verification/user_study/
+Study Assistant Feedback (Responses).xlsx
+

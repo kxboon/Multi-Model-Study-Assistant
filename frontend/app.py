@@ -222,6 +222,24 @@ with st.sidebar:
     st.title("📚 Study Assistant")
     st.divider()
 
+    # --- Participant link (?p=<id>) ---
+    # A moderated-study link carries the participant's module in the URL, e.g.
+    # https://<tunnel-host>/?p=P07. That pins the module for the whole session:
+    # the switcher and the create box are replaced by static text below, so a
+    # participant cannot reach another participant's material or a hidden
+    # dev/eval module. With no ?p= the sidebar behaves exactly as it did.
+    participant_id = (st.query_params.get("p") or "").strip()
+
+    if participant_id:
+        st.session_state.session_id = participant_id
+        if participant_id not in st.session_state.created_modules:
+            # Register it up front: the module holds no chunks until the
+            # participant ingests something, so GET /sessions will not return
+            # it yet, and ingest needs a non-empty session_id from the start.
+            st.session_state.created_modules.append(participant_id)
+        st.session_state.messages.setdefault(participant_id, [])
+        st.session_state.ingested_files.setdefault(participant_id, [])
+
     # --- Health status ---
     api_ok, ollama_ok = check_health()
     col1, col2 = st.columns(2)
@@ -240,47 +258,55 @@ with st.sidebar:
 
     server_sessions = fetch_sessions()
     chunk_counts = {s["session_id"]: s["chunks"] for s in server_sessions}
-    # Union the server's modules with any created this run but not yet ingested,
-    # excluding dev/test/evaluation modules that share the same store.
-    modules = sorted(
-        (set(chunk_counts) | set(st.session_state.created_modules)) - HIDDEN_MODULES
-    )
 
-    if modules:
-        # Keep the selection valid if the previous module vanished server-side.
-        if st.session_state.session_id not in modules:
-            st.session_state.session_id = modules[0]
-
-        selected = st.selectbox(
-            "Active module",
-            modules,
-            index=modules.index(st.session_state.session_id),
-            format_func=lambda m: f"{m}  ({chunk_counts.get(m, 0)} chunks)",
-            help="Queries and uploads apply only to the selected module.",
-        )
-        st.session_state.session_id = selected
+    if participant_id:
+        # Pinned by the participant link: static text, no switcher, no create
+        # box. Nothing here writes to session_id — it was set at the top of the
+        # sidebar and must stay fixed for the whole study session.
+        st.markdown(f"**{participant_id}**")
+        st.caption(f"{chunk_counts.get(participant_id, 0)} chunks stored")
     else:
-        # Empty store and nothing created yet — no dropdown, just the create box.
-        st.info("No modules yet. Create one below to get started.")
-        st.session_state.session_id = None
+        # Union the server's modules with any created this run but not yet
+        # ingested, excluding dev/test/evaluation modules that share the store.
+        modules = sorted(
+            (set(chunk_counts) | set(st.session_state.created_modules)) - HIDDEN_MODULES
+        )
 
-    new_module = st.text_input(
-        "New module name",
-        placeholder="e.g. CM3060",
-        help="Each module keeps its own material and its own conversation.",
-    )
-    if st.button("Create Module", use_container_width=True):
-        name = new_module.strip()
-        if not name:
-            st.warning("Enter a module name first.")
-        elif name in modules:
-            st.warning(f"Module '{name}' already exists.")
+        if modules:
+            # Keep the selection valid if the previous module vanished server-side.
+            if st.session_state.session_id not in modules:
+                st.session_state.session_id = modules[0]
+
+            selected = st.selectbox(
+                "Active module",
+                modules,
+                index=modules.index(st.session_state.session_id),
+                format_func=lambda m: f"{m}  ({chunk_counts.get(m, 0)} chunks)",
+                help="Queries and uploads apply only to the selected module.",
+            )
+            st.session_state.session_id = selected
         else:
-            st.session_state.created_modules.append(name)
-            st.session_state.session_id = name
-            st.session_state.messages.setdefault(name, [])
-            st.session_state.ingested_files.setdefault(name, [])
-            st.rerun()
+            # Empty store and nothing created yet — no dropdown, just the create box.
+            st.info("No modules yet. Create one below to get started.")
+            st.session_state.session_id = None
+
+        new_module = st.text_input(
+            "New module name",
+            placeholder="e.g. CM3060",
+            help="Each module keeps its own material and its own conversation.",
+        )
+        if st.button("Create Module", use_container_width=True):
+            name = new_module.strip()
+            if not name:
+                st.warning("Enter a module name first.")
+            elif name in modules:
+                st.warning(f"Module '{name}' already exists.")
+            else:
+                st.session_state.created_modules.append(name)
+                st.session_state.session_id = name
+                st.session_state.messages.setdefault(name, [])
+                st.session_state.ingested_files.setdefault(name, [])
+                st.rerun()
 
     # The selected module scopes everything below.
     module = st.session_state.session_id
