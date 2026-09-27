@@ -5,7 +5,7 @@ lecture material — PDFs, PowerPoint decks, audio recordings, and images.
 **No API keys required.** Every model runs on your own machine.
 
 Ask questions about your own notes, generate quizzes and flashcards from them, and
-track which topics you are struggling with — all offline.
+track which topics you are struggling with.
 
 ---
 
@@ -121,7 +121,7 @@ install starts one).
 ### First run
 
 Model weights download lazily, on first use, not at startup. The first ingest pulls
-Whisper, BLIP and the embedder; the first question also pulls the sentiment model —
+Whisper, BLIP and the embedder; the first question also pulls the sentiment model,
 around 3 GB in total, once. Expect the first ingest and the first question of a fresh
 install to be noticeably slow, and everything after that to be fast. Weights are cached
 in `models_cache/` and survive recreating the venv.
@@ -133,7 +133,7 @@ pytest backend/tests/ -v          # 47 tests, no Ollama or downloads needed
 curl http://localhost:8000/health # {"status":"ok","ollama":true}
 ```
 
-`"ollama": false` means the API is up but Ollama is not reachable — ingest will work,
+`"ollama": false` means the API is up but Ollama is not reachable, ingest will work,
 questions will not.
 
 ---
@@ -144,13 +144,13 @@ questions will not.
 pytest backend/tests/ -v
 ```
 
-47 tests. Every heavy dependency is mocked — BLIP, OCR, Whisper, ChromaDB,
-pdfplumber, python-pptx, and the Ollama HTTP call — so the suite is fast,
+47 tests. Every heavy dependency is mocked: BLIP, OCR, Whisper, ChromaDB,
+pdfplumber, python-pptx, and the Ollama HTTP call so the suite is fast,
 deterministic, and needs no GPU, no Ollama, and no model downloads.
 
 ---
 
-## 5. Using the API — curl examples
+## 5. Using the API (curl examples)
 
 ### Health
 
@@ -169,7 +169,7 @@ curl http://localhost:8000/sessions
 ### Ingest a file
 
 `session_id` is the study module the material belongs to. Every endpoint requires a
-non-empty one — a blank value would search or aggregate across every module at once.
+non-empty one, a blank value would search or aggregate across every module at once.
 
 `sample_files/` is gitignored and therefore **empty on a fresh clone**, the material
 developed against was licensed course content that cannot be redistributed. Put any PDF,
@@ -230,7 +230,7 @@ curl "http://localhost:8000/confidence?session_id=lecture_week1"
 ```
 
 Quiz, flashcard and sentiment aggregates are returned **separately and never
-averaged into a single score** — they are not equally trustworthy. See
+averaged into a single score**, they are not equally trustworthy. See
 `DOCUMENTATION.md` §11.
 
 ---
@@ -333,5 +333,5 @@ An evaluation run under a different embedding model writes to its own suffixed
 collection, so the default clears only the active one and `--all` clears those too.
 All three are irreversible; re-ingest your files afterwards. The debug logs
 (`chunks_debug.json`, `query_debug.json`, `signals.json`) are written at the project
-root, are gitignored, and are safe to delete — they regenerate on the next ingest or
+root, are gitignored, and are safe to delete, they regenerate on the next ingest or
 question.
