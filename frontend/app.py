@@ -14,20 +14,15 @@ import time
 # fail before falling back. That cost was paid on every rerun.
 API_URL = "http://127.0.0.1:8000"
 
-# Shown under each per-subject breakdown. Subjects are free text typed per quiz
-# or deck, and the backend only matches them case-insensitively, so closely
-# related wordings stay in separate rows. Saying so beats letting a split
-# breakdown read as a bug.
+# Subjects are free text matched case-insensitively, so related wordings stay in
+# separate rows. Saying so beats letting a split breakdown read as a bug.
 SUBJECT_MATCH_NOTE = (
     "Subjects are matched by exact wording (ignoring case). Differently worded "
     "subjects stay separate even when they cover the same ground."
 )
 
-# Dev/test/evaluation modules that live in the same ChromaDB collection as real
-# study material (verification/*.py harnesses and ad hoc manual testing write
-# to the same store) but must never appear in a participant's module dropdown.
-# Exact session_id match — these are never shown, but they are not deleted, so
-# existing signals/vectorstore data tied to them stays intact.
+# Dev/eval modules sharing the store with real study material, hidden from the
+# dropdown. Exact session_id match; hidden only, never deleted.
 HIDDEN_MODULES = {
     "Kai_Xiang_Test",
     "eval_set",
@@ -40,18 +35,14 @@ HIDDEN_MODULES = {
     "Machine Learning",
 }
 
-# ---------------------------------------------------------------------------
-# Page config
-# ---------------------------------------------------------------------------
+# --- Page config ---
 st.set_page_config(
     page_title="Study Assistant",
     page_icon="📚",
     layout="wide",
 )
 
-# ---------------------------------------------------------------------------
-# Session state initialisation
-# ---------------------------------------------------------------------------
+# --- Session state initialisation ---
 # Chat history and uploaded-file lists are keyed BY MODULE so switching modules
 # here resets when the Streamlit process restarts.
 if "messages" not in st.session_state:
@@ -76,16 +67,12 @@ if "quiz" not in st.session_state:
     st.session_state.quiz = {}
 
 if "flashcards" not in st.session_state:
-    # Keyed by module for the same reason as quiz. In-memory only — a deck
-    # lasts as long as the session. Spaced repetition is out of scope: nothing
-    # here schedules cards or survives a new deck.
+    # Keyed by module, in-memory only. Spaced repetition is out of scope.
     # {module: {"topic", "cards", "nonce", "index", "revealed", "ratings"}}
     st.session_state.flashcards = {}
 
 
-# ---------------------------------------------------------------------------
-# Helper — call backend
-# ---------------------------------------------------------------------------
+# --- Helper — call backend ---
 
 # Both helpers below run on EVERY rerun — including each flashcard reveal and
 # rating click — and each is an HTTP round trip. Uncached they dominated the
@@ -215,19 +202,15 @@ def fetch_confidence(session_id: str) -> dict:
     return r.json()
 
 
-# ---------------------------------------------------------------------------
-# Sidebar — status + upload + session
-# ---------------------------------------------------------------------------
+# --- Sidebar — status + upload + session ---
 with st.sidebar:
     st.title("📚 Study Assistant")
     st.divider()
 
     # --- Participant link (?p=<id>) ---
-    # A moderated-study link carries the participant's module in the URL, e.g.
-    # https://<tunnel-host>/?p=P07. That pins the module for the whole session:
-    # the switcher and the create box are replaced by static text below, so a
-    # participant cannot reach another participant's material or a hidden
-    # dev/eval module. With no ?p= the sidebar behaves exactly as it did.
+    # A study link like /?p=P07 pins the module for the whole session: the switcher
+    # and create box become static text, so a participant cannot reach another
+    # participant's material. With no ?p= the sidebar behaves normally.
     participant_id = (st.query_params.get("p") or "").strip()
 
     if participant_id:
@@ -354,11 +337,8 @@ with st.sidebar:
             # above would be caught by `except Exception` and shown as an error.
             # The rerun re-runs fetch_sessions(), refreshing the dropdown count.
             if ingest_ok:
-                # MUST clear first. The ingest just changed the chunk counts, but
-                # fetch_sessions() is cached — without this the rerun would be
-                # served the pre-ingest counts and the dropdown would show a
-                # stale number until the TTL expired, reintroducing exactly the
-                # bug the rerun above was added to fix.
+                # Must clear first: fetch_sessions() is cached, so without this the
+                # rerun would be served pre-ingest counts until the TTL expired.
                 fetch_sessions.clear()
                 st.rerun()
 
@@ -378,9 +358,7 @@ with st.sidebar:
         st.rerun()
 
 
-# ---------------------------------------------------------------------------
-# Main area — chat interface
-# ---------------------------------------------------------------------------
+# --- Main area — chat interface ---
 st.title("📖 Study Workspace")
 
 if not module:
@@ -395,9 +373,7 @@ tab_chat, tab_quiz, tab_cards, tab_progress = st.tabs(
     ["💬 Chat", "📝 Quiz", "🗂️ Flashcards", "📊 Progress"]
 )
 
-# ---------------------------------------------------------------------------
-# Chat tab — behaviour unchanged, only relocated inside the tab
-# ---------------------------------------------------------------------------
+# --- Chat tab — behaviour unchanged, only relocated inside the tab ---
 with tab_chat:
     # This module's history. setdefault returns the live list, so appends below
     # write straight back into st.session_state.messages[module].
@@ -471,9 +447,7 @@ with tab_chat:
                     )
 
 
-# ---------------------------------------------------------------------------
-# Quiz tab — generate MCQs from this module, mark them locally
-# ---------------------------------------------------------------------------
+# --- Quiz tab — generate MCQs from this module, mark them locally ---
 with tab_quiz:
     quiz = st.session_state.quiz.get(module)
 
@@ -551,10 +525,8 @@ with tab_quiz:
                 for w in quiz["warnings"]:
                     st.markdown(f"- {w}")
 
-        # Submitting and starting a new quiz redraw this slot in place rather
-        # than calling st.rerun(). An explicit rerun re-creates the tab strip,
-        # losing the client-side "which tab is open" state and dropping the
-        # user back on Chat — mid-quiz, that means never seeing your score.
+        # Redraw in place rather than st.rerun(): an explicit rerun re-creates the
+        # tab strip, dropping the user back on Chat before they see their score.
         quiz_slot = st.empty()
 
         def draw_form() -> bool:
@@ -660,9 +632,7 @@ with tab_quiz:
                 reset_quiz()
 
 
-# ---------------------------------------------------------------------------
-# Flashcards tab — term on the front, definition on the back, one at a time
-# ---------------------------------------------------------------------------
+# --- Flashcards tab — term on the front, definition on the back, one at a time ---
 with tab_cards:
     deck = st.session_state.flashcards.get(module)
 
@@ -744,10 +714,8 @@ with tab_cards:
                 for w in deck["warnings"]:
                     st.markdown(f"- {w}")
 
-        # Reveals and ratings redraw these slots in place instead of calling
-        # st.rerun(). An explicit rerun re-creates the tab strip, which loses
-        # the client-side "which tab is open" state and drops the user back on
-        # Chat — so going through a deck kicked you out on every click.
+        # Redraw in place rather than st.rerun(), same tab-strip reason as the quiz:
+        # an explicit rerun kicked the user back to Chat on every click.
         card_slot = st.empty()
         summary_slot = st.empty()
 
@@ -859,9 +827,7 @@ with tab_cards:
                 reset_deck()
 
 
-# ---------------------------------------------------------------------------
-# Progress tab — per-signal-type confidence, deliberately NOT one blended score
-# ---------------------------------------------------------------------------
+# --- Progress tab — per-signal-type confidence, deliberately NOT one blended score ---
 with tab_progress:
     # Refreshing redraws this slot in place rather than calling st.rerun(),
     # which would re-create the tab strip and bounce the user back to Chat.

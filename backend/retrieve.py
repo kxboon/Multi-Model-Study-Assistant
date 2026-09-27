@@ -23,9 +23,7 @@ import chromadb
 from backend.models.embedder import Embedder, collection_name
 from backend.paths import resolve_path
 
-# ---------------------------------------------------------------------------
-# Shared singletons — lazy model loading is handled inside Embedder
-# ---------------------------------------------------------------------------
+# --- Shared singletons — lazy model loading is handled inside Embedder ---
 _embedder = Embedder()
 
 CHROMA_PATH = resolve_path("CHROMA_PATH", "./vectorstore/chroma_db")
@@ -35,29 +33,12 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
 # Ollama reports its internal durations in nanoseconds.
 NS = 1e9
 
-# ---------------------------------------------------------------------------
-# Query debug log
-#
-# One record per retrieval, appended to query_debug.json:
-#
-#   id             stable uuid, so the answer can be attached to this exact record
-#   asked_at       when the retrieval ran
-#   question       the query string
-#   session_id     the module searched
-#   answer         what the model replied, filled in by log_answer() after
-#                  generation; stays null if generation failed or the caller
-#                  never generated (e.g. /quiz and /flashcards, which retrieve
-#                  through query_rag but produce JSON items rather than an answer)
-#   answered_at    when the answer was attached
-#   retrieved      the chunks passed to the model, with rank/distance/metadata
-#
-# NOTE: answers were NOT persisted before this change — every record written
-# prior to it has no "answer" key at all, not a null one. Absence of the key
-# means "never recorded"; a null value means "recorded, but no answer arrived".
-# Historical records therefore cannot show whether an ingest-stage error (an
-# ASR mis-transcription, say) actually reached the student in an answer; only
-# that the flawed chunk was retrieved into the model's context.
-# ---------------------------------------------------------------------------
+# Query debug log: one record per retrieval, appended to query_debug.json, with
+# id / asked_at / question / session_id / answer / answered_at / retrieved.
+# `answer` is filled in by log_answer() after generation and stays null when the
+# caller never generated one (/quiz and /flashcards retrieve but return items).
+# Records written before answers were persisted have no "answer" key at all,
+# which is distinct from a null one.
 DEBUG_PATH = Path("query_debug.json")
 
 
@@ -82,9 +63,7 @@ _collection = _chroma_client.get_or_create_collection(
 )
 
 
-# ---------------------------------------------------------------------------
-# Public functions
-# ---------------------------------------------------------------------------
+# --- Public functions ---
 
 def query_rag(
     question: str,
@@ -271,13 +250,10 @@ def ask_ollama(
 
     elapsed = time.perf_counter() - t_ollama
 
-    # Throughput comes from Ollama's own counters on the final frame, as
-    # verification/eval_llm.py does: eval_count is the number of tokens actually
-    # generated and eval_duration the nanoseconds spent generating them.
-    # Dividing those isolates generation speed from model load, prompt
-    # evaluation and connection time, all of which sit inside the wall clock.
-    # Counting streamed frames against wall time instead understated the rate
-    # by roughly threefold (~3 tok/s reported where Ollama measured 10-13).
+    # Throughput from Ollama's own final-frame counters, as verification/eval_llm.py
+    # does: eval_count / eval_duration isolates generation from model load, prompt
+    # evaluation and connection time. Counting streamed frames against wall time
+    # understated the rate roughly threefold.
     eval_count = final_chunk.get("eval_count") or 0
     eval_duration = final_chunk.get("eval_duration") or 0
 

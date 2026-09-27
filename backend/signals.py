@@ -1,43 +1,16 @@
-"""
-Learning-signal logging.
+"""Learning-signal logging.
 
-A "signal" is any observation about how a student is coping with their
-material — currently the sentiment of the questions they ask, later things
-like quiz performance. Signals are appended to a JSON file so they can be
-analysed offline without adding a database to the project.
+A signal is one observation of how a student is coping with their material:
+question sentiment, quiz results, flashcard self-ratings. Records are appended
+to a JSON file rather than a database, which is enough at this scale.
 
-Record shape:
+    {"timestamp", "session_id", "topic", "signal_type", "value", "score",
+     "question", "retrieved_sources"}
 
-    {
-      "timestamp": "2026-08-04T14:03:11.123456",
-      "session_id": "CM3060",
-      "topic": "CM3060",
-      "signal_type": "sentiment",
-      "value": "NEGATIVE",
-      "score": 0.87,
-      "question": "I still don't understand this at all",
-      "retrieved_sources": ["CM3060_L6.pptx"]
-    }
-
-Two fields are deliberately loose:
-
-- `topic` currently mirrors `session_id`, but it is stored as its own field
-  rather than aliased, so a finer-grained topic (a slide range, a concept)
-  can replace it later without rewriting existing records. Every signal type
-  must mean the SAME thing by `topic`, otherwise records cannot be aggregated
-  across types — anything narrower belongs in a type-specific field instead.
-- `signal_type` names the kind of observation, so quiz-performance or
-  time-on-task signals can be appended to the same file with no schema change.
-
-Signal types may add their own extra fields alongside the common ones. Current
-extras:
-
-- "quiz" records carry `quiz_topic`, the subject the questions were generated
-  from. It is deliberately NOT stored in `topic`, so that `topic` stays
-  comparable with the sentiment records.
-- "flashcard" records carry `flashcard_topic`, the subject the deck was
-  generated from, for the same reason. Their `question` field holds the card's
-  term — the slot that names whatever was being assessed.
+`topic` mirrors `session_id` today but is stored separately so a finer-grained
+topic can replace it later. Every signal type must mean the same thing by it or
+records cannot be aggregated across types, so a type's own subject goes in its
+own field instead (`quiz_topic`, `flashcard_topic`).
 """
 
 import json
@@ -52,9 +25,8 @@ SIGNALS_PATH = resolve_path("SIGNALS_PATH", "./signals.json")
 def read_signals() -> list:
     """Return every signal record, or [] if there are none to read.
 
-    A missing file, an empty file, or a corrupt one all yield an empty list
-    rather than an error: signals are observational, and a reader asking "how
-    is this student doing" should get "no data yet", never a crash.
+    A missing, empty or corrupt file yields [] rather than raising: signals are
+    observational, so a reader should get "no data yet", never a crash.
     """
     path = Path(SIGNALS_PATH)
 
@@ -67,23 +39,16 @@ def read_signals() -> list:
     if not isinstance(records, list):
         records = [records]
 
-    # Defend against hand-edited files: anything that is not a dict is not a
-    # record, and would break every consumer downstream.
+    # Hand-edited files: anything that is not a dict is not a record.
     return [r for r in records if isinstance(r, dict)]
 
 
 def log_signal(record: dict) -> None:
     """Append one signal record to the signals JSON file.
 
-    Uses the same read-append-write cycle as query_debug.json in retrieve.py:
-    the whole file is loaded, extended, and rewritten. That is fine at project
-    scale and keeps the file valid JSON rather than JSON-lines.
-
-    A missing `timestamp` is filled in here so every caller does not have to
-    remember it. Any other field is stored exactly as given.
-
-    Args:
-        record: The signal to append. See the module docstring for the shape.
+    Read-append-write of the whole file, as query_debug.json does: fine at this
+    scale and keeps the file valid JSON rather than JSON-lines. A missing
+    `timestamp` is filled in here.
     """
     record.setdefault("timestamp", datetime.now().isoformat())
 

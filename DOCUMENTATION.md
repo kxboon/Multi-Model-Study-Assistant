@@ -71,7 +71,7 @@ contacts Streamlit.
 ## 3. Directory Layout
 
 ```
-multimodal-study-assistant/
+Multi-Model-Study-Assistant/
 ├── backend/
 │   ├── main.py                  # FastAPI app — 9 endpoints
 │   ├── ingest.py                # Ingestion pipeline (PDF/PPTX/audio/image → ChromaDB)
@@ -360,58 +360,3 @@ pytest backend/tests/ -v
   request whose generation had already succeeded.
 
 ---
-
-## 11. Key Design Decisions
-
-- **Fully local and private** — no API keys; all inference (embeddings, STT,
-  captioning, OCR, LLM) runs on-device.
-- **Lazy model loading with caching** — fast startup; the first inference pays the load
-  cost; weights persist on disk.
-- **Cosine similarity** for text embeddings, which suits sentence-transformer vectors
-  better than L2.
-- **Module isolation** — the collection is partitioned by `session_id`, and an empty
-  one is rejected rather than treated as "search everything".
-- **Path anchoring** — relative paths resolve against the project root, not the working
-  directory, so the store cannot silently fork in two (§4.5).
-- **Grounded prompting** — the LLM is told to answer *only* from the retrieved notes,
-  reducing hallucination and keeping answers traceable to source files.
-- **Multimodal fallbacks** — image-heavy PDF pages, embedded slide images, SmartArt and
-  table XML, and standalone images are recovered via OCR and captioning rather than
-  being silently dropped.
-- **Client-side marking** — quiz correctness and flashcard "known" are decided in the
-  UI and never re-derived from the LLM; the backend only logs the outcome.
-- **Signal types are never averaged.** `/confidence` returns quiz, flashcard and
-  sentiment aggregates separately, because they are not equally trustworthy: quiz
-  results are measured, flashcard ratings are self-reported, and sentiment is inferred
-  by a model trained on a different domain. Combining them would produce a number with
-  no defensible meaning.
-- **Signal logging is always best-effort.** The student-facing result is produced
-  before logging runs, so a logging failure degrades to a printed warning and never
-  fails the request.
-
----
-
-## 12. Current Status & Notes
-
-- The backend (9 endpoints), the full ingest pipeline (4 file types), RAG retrieval and
-  generation, the four-tab Streamlit UI, and the learning-signal tracker are all
-  **implemented and unit-tested** (47 tests).
-- `sentiment_model.py` **is** wired into the query flow: `/query` classifies the
-  question's tone and logs it as a signal, which `/confidence` then aggregates. It runs
-  on CPU (`device=-1`).
-- **Known limitation — quiz key quality is bounded by ingest quality.** Quiz items
-  generated from clean text are reliably keyed; items generated from OCR-degraded
-  sources (scanned slides, screenshots embedded in decks) are frequently mis-keyed or
-  ambiguous, because the generator inherits whatever the OCR produced. Nothing
-  downstream can detect this — marking is faithful to the key, and it is the key that
-  is wrong. The mitigation is transparency rather than correction: the source chunk is
-  displayed next to every marked question so a student who disagrees can check the
-  material. See `verification/BUCKET_B_FINDINGS.md`.
-- **Known limitation — no conversation history.** Each query is independent. Only the
-  retrieved chunks are sent to the model, never prior turns, so a follow-up such as
-  "explain that again" has no antecedent.
-- `requirements.txt` lists `sqlalchemy` for possible future session/metadata tracking;
-  it is not currently used.
-- `jiwer` is present only for `verification/eval_whisper.py`.
-- `test_pipeline.ipynb` and `make_figures.ipynb` at the repo root are for manual
-  exploration and report-figure generation respectively; neither is imported by the app.

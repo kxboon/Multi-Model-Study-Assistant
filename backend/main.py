@@ -37,9 +37,7 @@ from backend.retrieve import _collection
 from backend.models.sentiment_model import SentimentModel
 from backend.signals import log_signal, read_signals
 
-# ---------------------------------------------------------------------------
-# App setup
-# ---------------------------------------------------------------------------
+# --- App setup ---
 app = FastAPI(
     title="Multimodal Study Assistant",
     description="Local RAG pipeline for lecture notes, slides, and audio.",
@@ -49,30 +47,15 @@ app = FastAPI(
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
 
-# Shared singleton — SentimentModel loads its weights lazily on first predict(),
-# so constructing it here is free at import time but keeps the pipeline in
-# memory for the server's lifetime instead of reloading it per request.
-# Same arrangement as _embedder in retrieve.py.
+# Loaded once per process; weights load lazily on first predict().
 _sentiment = SentimentModel()
 
 
-# ---------------------------------------------------------------------------
-# Request / Response schemas
-# ---------------------------------------------------------------------------
+# --- Request / Response schemas ---
 
-# NOTE on `str | None = None` throughout these models.
-#
-# Under Pydantic v2, `x: str = None` declares a field of type str whose default
-# happens to be None. Defaults are not validated, so OMITTING the key works —
-# but sending it explicitly as JSON null is a type error and FastAPI rejects the
-# whole request with 422 before the endpoint body runs.
-#
-# The frontend builds payloads with dict literals, so optional keys are always
-# present and carry null rather than being absent. That combination silently
-# lost 10 of 11 flashcard ratings: every card without provenance sent
-# "source_file": null and was rejected at the HTTP boundary, where none of the
-# endpoints' per-item failure isolation could see it. Any field the frontend may
-# send as null must therefore be Optional in the annotation, not merely defaulted.
+# Optional fields are `str | None`, not just defaulted: under Pydantic v2 a plain
+# `x: str = None` rejects an explicit JSON null with 422, and the frontend's dict
+# literals always send optional keys as null. Cost 10 of 11 flashcard ratings once.
 
 class QueryRequest(BaseModel):
     question: str
@@ -123,17 +106,10 @@ class FlashcardSignalsRequest(BaseModel):
     results: list[FlashcardResultItem] = []
 
 
-# ---------------------------------------------------------------------------
-# Confidence aggregation
-# ---------------------------------------------------------------------------
+# --- Confidence aggregation ---
 
-# A sentiment record only counts as evidence at or above this confidence, and
-# the rule applies to EVERY label, not just negative ones. Below it the model is
-# not telling us anything usable: one terse factual question ("what is
-# lemmatization") scored neutral 0.597 while another scored negative 0.375 —
-# both are weak readings of the same kind of input, so treating the neutral one
-# as a finding while discarding the negative one would be arbitrary. Anything
-# under the threshold is reported as inconclusive.
+# Applies to every label, not just negative: below this the reading is not usable
+# evidence either way, so it is reported as inconclusive.
 SENTIMENT_SCORE_THRESHOLD = 0.6
 
 
@@ -233,9 +209,7 @@ def _breakdown(records: list, field: str, aggregate) -> list:
     ]
 
 
-# ---------------------------------------------------------------------------
-# Quiz generation helpers
-# ---------------------------------------------------------------------------
+# --- Quiz generation helpers ---
 
 def _ollama_generate(prompt: str, model: str = None) -> str:
     """Send a raw prompt to Ollama and return the completion.
@@ -265,15 +239,9 @@ def _ollama_generate(prompt: str, model: str = None) -> str:
 
 # Delimiter for the numbered source chunks in generation prompts.
 #
-# It must NOT be bracketed. The original "[CHUNK 3]" collided with IEEE-style
-# citation markers in academic PDFs: given a survey paper whose retrieved text
-# carried 77 bracketed references spanning [104]-[279], the model cited those
-# instead of the chunk labels and returned source indices of 211, 212, 214, 215,
-# 216, 218 and 237 for a 10-chunk prompt. Every one of those is a literal
-# citation marker in the notes. _coerce_source_index rejected them all, which is
-# correct, but the result was flashcards with no provenance — 10 of 11 in one
-# deck. Corpora without bracketed citations were unaffected, which is why it
-# looked intermittent.
+# Must not be bracketed: "[CHUNK 3]" collided with IEEE citation markers in
+# academic PDFs, and the model returned those ([104]-[279]) as source indices
+# instead of chunk labels, leaving 10 of 11 flashcards with no provenance.
 SOURCE_LABEL = "=== SOURCE {i} ==="
 
 
@@ -430,11 +398,8 @@ def _validate_quiz_item(obj, n_chunks: int):
         return None, f"'options' must be a list of 4, got {got}"
     options = [str(o) for o in options]
 
-    # Four identical (or whitespace/case-variant-identical) options make the
-    # question unanswerable regardless of which index is "correct" — every
-    # option is the same choice. Compare case-insensitive and whitespace-
-    # normalised so "Overfitting " and "overfitting" still count as the same
-    # option, not four distinct ones by accident of formatting.
+    # Identical options make the question unanswerable whatever the key says.
+    # Normalise case and whitespace so "Overfitting " and "overfitting" match.
     normalised = {" ".join(o.split()).lower() for o in options}
     if len(normalised) < 4:
         return None, "'options' contains duplicate entries — four distinct options are required"
@@ -566,9 +531,7 @@ def _attach_provenance(items: list, chunks: list, metadatas: list) -> None:
         item["page_or_slide"] = meta.get("page_or_slide")
 
 
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
+# --- Endpoints ---
 
 @app.get("/health")
 def health_check():
@@ -730,11 +693,9 @@ def query_endpoint(req: QueryRequest):
     # returns before generation happens. log_answer never raises.
     log_answer(rag_result.get("debug_id"), answer)
 
-    # --- Learning signal: how the student sounds when asking ---------------
-    # Entirely best-effort. The answer is already generated at this point, so
-    # nothing here is allowed to fail the request: a broken model download, a
-    # bad prediction, or an unwritable signals file must all degrade to a
-    # logged warning. Hence the deliberately broad except.
+    # --- Learning signal: how the student sounds when asking ---
+    # Best-effort: the answer is already generated, so nothing here may fail the
+    # request. Hence the broad except.
     try:
         t_sent = time.perf_counter()
         sentiment = _sentiment.predict(req.question)
@@ -841,10 +802,8 @@ def quiz_endpoint(req: QuizRequest):
     parse_elapsed = time.perf_counter() - t_parse
     print(f"[TIMER] Quiz parsing: {parse_elapsed:.4f}s")
 
-    # The model sometimes over-produces (e.g. 11 items for a 10-item request).
-    # Cap to what was asked for so the frontend never renders more than the
-    # student requested; "parsed" below then reports what was actually
-    # returned, not what the model happened to emit before the cut.
+    # The model sometimes over-produces. Cap to the requested count; "parsed"
+    # below reports what was actually returned.
     if len(items) > n_questions:
         warnings.append(
             f"model produced {len(items)} valid items; truncated to the "
@@ -888,19 +847,15 @@ def quiz_signals_endpoint(req: QuizSignalsRequest):
             detail="session_id is required to record quiz signals.",
         )
 
-    # Best-effort, exactly like the sentiment signal on /query: the student has
-    # already seen their score by the time this is called, so a logging failure
-    # must never surface as an error. Each record is isolated so one bad item
-    # cannot lose the rest.
+    # Best-effort like the sentiment signal on /query — the score is already
+    # shown. Each record is isolated so one bad item cannot lose the rest.
     logged, failed = 0, 0
     for result in req.results:
         try:
             log_signal({
                 "session_id": session_id,
-                # topic mirrors session_id here exactly as it does for the
-                # sentiment records. Both signal types must mean the same thing
-                # by "topic" so the confidence tracker can aggregate across
-                # them; the quiz's own subject goes in quiz_topic below.
+                # topic mirrors session_id so signal types stay aggregatable;
+                # the quiz's own subject goes in quiz_topic below.
                 "topic": session_id,
                 "signal_type": "quiz",
                 "value": "correct" if result.correct else "incorrect",
@@ -988,11 +943,9 @@ def flashcards_endpoint(req: FlashcardRequest):
     parse_elapsed = time.perf_counter() - t_parse
     print(f"[TIMER] Flashcard parsing: {parse_elapsed:.4f}s")
 
-    # A topic with fewer distinct concepts than n_cards makes the model repeat
-    # a term with a near-identical definition rather than admit it has run
-    # out of material. Dedupe on the term (case-insensitive), keeping the
-    # first occurrence, before capping — otherwise a deck that is genuinely
-    # smaller than requested would get padded back up with repeats.
+    # A thin topic makes the model repeat a term with a near-identical definition.
+    # Dedupe on term (case-insensitive) before capping, so a small deck is not
+    # padded back up with repeats.
     seen_terms = set()
     deduped_cards = []
     for card in cards:
@@ -1056,10 +1009,8 @@ def flashcard_signals_endpoint(req: FlashcardSignalsRequest):
         try:
             log_signal({
                 "session_id": session_id,
-                # topic mirrors session_id, the same invariant every signal
-                # type holds to so they stay aggregatable — see the schema
-                # docstring in signals.py. The deck's subject goes in
-                # flashcard_topic, matching how quiz_topic is handled.
+                # topic mirrors session_id, as for every signal type; the deck's
+                # subject goes in flashcard_topic.
                 "topic": session_id,
                 "signal_type": "flashcard",
                 "value": "known" if result.known else "unknown",

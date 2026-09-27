@@ -29,21 +29,15 @@ from backend.models.ocr_model import OCRModel
 from backend.models.embedder import Embedder, collection_name
 from backend.paths import resolve_path
 
-# ---------------------------------------------------------------------------
-# Shared model instances — module-level singletons with lazy loading baked in
-# ---------------------------------------------------------------------------
+# --- Shared model instances — module-level singletons with lazy loading baked in ---
 _whisper = WhisperModel()
 _blip = BLIPModel()
 _ocr = OCRModel()
 _embedder = Embedder()
 
-# ---------------------------------------------------------------------------
-# ChromaDB persistent client — keeps the vector store between restarts
-# ---------------------------------------------------------------------------
-# Ingest-time dump of every chunk before embedding. A module constant rather
-# than a literal inside _store_chunks so tests can redirect it — otherwise a
-# test run appends synthetic fixture chunks to the real file, which is used as
-# evidence for report claims. Mirrors retrieve.DEBUG_PATH.
+# --- ChromaDB persistent client — keeps the vector store between restarts ---
+# Every chunk dumped before embedding. A module constant so tests can redirect it,
+# rather than polluting the real file used as report evidence.
 CHUNKS_DEBUG_PATH = Path("chunks_debug.json")
 
 CHROMA_PATH = resolve_path("CHROMA_PATH", "./vectorstore/chroma_db")
@@ -58,9 +52,7 @@ _collection = _chroma_client.get_or_create_collection(
 )
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
+# --- Internal helpers ---
 
 def _sliding_window(words: list, window: int = 200, overlap: int = 50) -> list:
     """Split a word list into overlapping chunks.
@@ -166,10 +158,8 @@ def _store_chunks(chunks: list, metadatas: list) -> int:
 
     embeddings = _embedder.embed(chunks)  # timed inside Embedder
 
-    # Re-ingesting a file must REPLACE its previous chunks, not append a second
-    # copy. IDs are random uuid4s, so upsert never collides and would duplicate.
-    # Delete any existing chunks for this (source_file, session_id) pair first.
-    # No-op when there's nothing to delete (first-time ingest).
+    # Re-ingesting must replace, not append: ids are random uuid4s so upsert never
+    # collides and would duplicate. No-op on first ingest.
     identity = {
         "$and": [
             {"source_file": metadatas[0]["source_file"]},
@@ -193,9 +183,7 @@ def _store_chunks(chunks: list, metadatas: list) -> int:
     return len(chunks)
 
 
-# ---------------------------------------------------------------------------
-# File-type-specific extraction functions
-# ---------------------------------------------------------------------------
+# --- File-type-specific extraction functions ---
 
 def _process_pdf(file_path: str, filename: str, session_id: str) -> tuple:
     """Extract text from a PDF, falling back to BLIP+OCR for image-heavy pages.
@@ -408,9 +396,7 @@ def _process_image(file_path: str, filename: str, session_id: str) -> tuple:
     return chunks, metadatas
 
 
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
+# --- Public API ---
 
 def ingest_file(file_path: str, metadata: dict) -> int:
     """Ingest a study file into the ChromaDB vector store.
@@ -434,10 +420,8 @@ def ingest_file(file_path: str, metadata: dict) -> int:
     if not path.exists():
         raise FileNotFoundError(f"File not found: {file_path}")
 
-    # Prefer a caller-supplied original filename. HTTP uploads land in a random
-    # temp file, so path.name would record e.g. "tmpqzkuxxqr.pptx" — wrong for
-    # citations, and it defeats the source_file+session_id dedup on re-upload.
-    # Direct callers that pass no source_file fall back to the real path name.
+    # HTTP uploads land in a random temp file, so path.name would record
+    # "tmpqzkuxxqr.pptx" — wrong for citations, and it breaks the re-upload dedup.
     filename = metadata.get("source_file") or path.name
     session_id = metadata.get("session_id", "default")
     ext = path.suffix.lower()

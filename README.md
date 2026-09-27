@@ -47,8 +47,8 @@ sudo apt-get install poppler-utils   # Ubuntu/Debian
 
 ```bash
 # 1. Clone and enter the project
-git clone <your-repo-url>
-cd multimodal-study-assistant
+git clone https://github.com/kxboon/Multi-Model-Study-Assistant.git
+cd Multi-Model-Study-Assistant
 
 # 2. Create and activate a virtual environment
 python -m venv venv
@@ -171,6 +171,11 @@ curl http://localhost:8000/sessions
 `session_id` is the study module the material belongs to. Every endpoint requires a
 non-empty one — a blank value would search or aggregate across every module at once.
 
+`sample_files/` is gitignored and therefore **empty on a fresh clone**, the material
+developed against was licensed course content that cannot be redistributed. Put any PDF,
+PPTX, MP3/WAV or PNG/JPG of your own there and substitute its name below; a few pages of
+lecture notes is enough to try every feature.
+
 ```bash
 curl -X POST http://localhost:8000/ingest \
   -F "file=@sample_files/test_notes.pdf" \
@@ -261,7 +266,7 @@ All settings live in `.env` (see `.env.example`).
 ## 8. Project structure
 
 ```
-multimodal-study-assistant/
+Multi-Model-Study-Assistant/
 ├── backend/
 │   ├── main.py              # FastAPI app — 9 endpoints
 │   ├── ingest.py            # File → chunks → embeddings → ChromaDB
@@ -278,7 +283,7 @@ multimodal-study-assistant/
 ├── frontend/
 │   └── app.py               # Streamlit UI — Chat, Quiz, Flashcards, Progress
 ├── verification/            # Standalone evaluation scripts and their findings
-├── sample_files/            # Your own test material (gitignored)
+├── sample_files/            # Your own material to ingest (gitignored, empty on clone)
 ├── vectorstore/             # ChromaDB persists here (auto-created, gitignored)
 ├── models_cache/            # HuggingFace weight cache (gitignored)
 ├── clear_db.py              # Reset the vector store
@@ -295,7 +300,28 @@ For how any of it works, see `DOCUMENTATION.md`.
 
 ---
 
-## 9. Resetting
+## 9. Evaluation scripts
+
+`verification/` holds the standalone harnesses behind the findings documents
+(retrieval recall, LLM answer quality, Whisper model comparison, module isolation).
+They are not imported by the app.
+
+Run them as modules from the repository root, not as file paths:
+
+```bash
+python -m verification.verify_query
+python -m verification.verify_isolation
+```
+
+The `verify_*` scripts import `backend.*` and have no path shim, so
+`python verification/verify_query.py` fails with `ModuleNotFoundError: No module
+named 'backend'`. The `eval_*` scripts set `sys.path` themselves and run either way.
+
+Most need Ollama running and material already ingested.
+
+---
+
+## 10. Resetting
 
 ```bash
 python clear_db.py            # empty the active collection, keep the directory

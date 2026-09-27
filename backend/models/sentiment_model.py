@@ -1,20 +1,11 @@
-"""
-Sentiment analysis wrapper using HuggingFace Transformers pipeline.
+"""Sentiment wrapper over cardiffnlp/twitter-roberta-base-sentiment-latest.
 
-Uses cardiffnlp/twitter-roberta-base-sentiment-latest, which returns three
-labels — negative / neutral / positive.
+Three labels: negative / neutral / positive, lowercase. The neutral class is why
+this replaced the binary distilbert-sst-2 model, which had nowhere to put
+affectless text and scored plain questions like "what is lemmatization" NEGATIVE
+at >0.99, indistinguishable from real frustration.
 
-The three-way split matters here. The previous model
-(distilbert-base-uncased-finetuned-sst-2-english) was binary, so it had
-nowhere to put affectless text: plain factual questions like "what is
-lemmatization" came back NEGATIVE at >0.99, indistinguishable from genuine
-frustration. With a neutral class those questions land on neutral instead,
-so a negative label actually means something.
-
-In the study assistant context, sentiment flags how a student sounds when
-asking a question, which is logged as a learning signal (see backend/signals.py).
-
-NOTE: this model's labels are lowercase ("negative", not "NEGATIVE").
+Used to flag how a student sounds when asking, logged via backend/signals.py.
 """
 
 from transformers import pipeline
@@ -23,11 +14,7 @@ from backend.paths import resolve_path
 
 
 class SentimentModel:
-    """Lazy-loading sentiment classifier.
-
-    The pipeline (tokeniser + weights) is downloaded once and cached
-    to ./models_cache/ to avoid repeated downloads across sessions.
-    """
+    """Lazy-loading sentiment classifier, cached to ./models_cache/."""
 
     MODEL_ID = "cardiffnlp/twitter-roberta-base-sentiment-latest"
 
@@ -47,17 +34,8 @@ class SentimentModel:
             )
 
     def predict(self, text: str) -> dict:
-        """Return sentiment label and confidence score for a text snippet.
-
-        Args:
-            text: The input string (truncated internally to 512 tokens).
-
-        Returns:
-            {"label": "negative" | "neutral" | "positive", "score": float}
-        """
+        """Return {"label": negative|neutral|positive, "score": float}."""
         self._load()
 
-        # Truncate to 512 chars as a safety measure before tokenisation
-        result = self._pipe(text[:512])
-        # pipeline returns a list; we always pass one item so take index 0
-        return result[0]
+        # Truncate before tokenisation; the pipeline returns a one-item list.
+        return self._pipe(text[:512])[0]

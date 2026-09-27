@@ -1,22 +1,12 @@
-"""
-Sentence-transformers embedding wrapper.
+"""Sentence-transformers embedding wrapper.
 
-Defaults to all-MiniLM-L6-v2 — a small but high-quality model that produces
-384-dimensional embeddings and runs fast on CPU. The active model can be
-swapped for an evaluation run by setting the EMBED_MODEL environment
-variable, e.g. all-mpnet-base-v2 (768-dim, larger and slower).
+Defaults to all-MiniLM-L6-v2 (384-dim, fast on CPU). EMBED_MODEL swaps it for an
+evaluation run, e.g. all-mpnet-base-v2 (768-dim).
 
-Why the collection name lives in this file
-------------------------------------------
-A ChromaDB collection's dimensionality is pinned by its FIRST write and can
-never hold two sizes — writing a 768-dim vector into a 384-dim collection
-raises InvalidDimensionException. So the embedding model and the collection
-are not independent choices: changing one without the other is always a bug.
-
-Keeping collection_name() next to the model resolution makes that impossible
-to get wrong. Both backend.ingest and backend.retrieve derive their collection
-from here, so a single process cannot mix models, and a run under EMBED_MODEL
-automatically reads and writes its own collection.
+collection_name() lives here because a ChromaDB collection's dimensionality is
+pinned by its first write, so the model and the collection are not independent
+choices. Both ingest and retrieve derive the collection from here, so a process
+cannot mix models and an EMBED_MODEL run gets its own collection.
 """
 
 import os
@@ -26,26 +16,16 @@ from sentence_transformers import SentenceTransformer
 
 from backend.paths import resolve_path
 
-# Base name for the vector store collection. The default model keeps this name
-# unchanged so existing data is never orphaned by the swap mechanism.
+# The default model keeps this name, so the swap mechanism never orphans data.
 DEFAULT_COLLECTION = "study_materials"
 
 
 class Embedder:
     """Lazy-loading text embedder backed by sentence-transformers.
 
-    Weights are cached to ./models_cache/ so subsequent runs skip the
-    download step even if the venv is recreated.
-
-    The model is chosen, in order of precedence:
-      1. the ``model_id`` constructor argument,
-      2. the EMBED_MODEL environment variable,
-      3. MODEL_ID, the default below.
-
-    Module-level singletons (backend.ingest, backend.retrieve) are constructed
-    with no arguments at import time, so the environment variable is the only
-    way to swap them — which is deliberate: it means one setting applies to
-    ingest and query alike for the whole process.
+    Weights cache to ./models_cache/ and survive recreating the venv. The model
+    is the ``model_id`` argument, else EMBED_MODEL, else MODEL_ID. The ingest and
+    retrieve singletons take no argument, so EMBED_MODEL applies to both.
     """
 
     MODEL_ID = "all-MiniLM-L6-v2"
@@ -57,12 +37,10 @@ class Embedder:
 
     @classmethod
     def resolve_model_id(cls, model_id: str = None) -> str:
-        """Return the model name that an Embedder(model_id) would actually use.
+        """Return the model name an Embedder(model_id) would use.
 
-        Exposed as a classmethod so callers can label output files with the
-        active model without instantiating (and therefore loading) anything.
-        Reading MODEL_ID directly is wrong once EMBED_MODEL is in play — it
-        reports the default rather than the model in use.
+        A classmethod so callers can label output files without loading anything.
+        Reading MODEL_ID directly reports the default, not the model in use.
         """
         return model_id or os.getenv("EMBED_MODEL") or cls.MODEL_ID
 
@@ -77,14 +55,9 @@ class Embedder:
                   f"{time.perf_counter() - t0:.2f}s")
 
     def embed(self, texts: "list[str] | str") -> list:
-        """Convert one or more text strings into embedding vectors.
+        """Convert one or more strings into embedding vectors.
 
-        Args:
-            texts: A single string or a list of strings.
-
-        Returns:
-            A list of embedding vectors (each a list of floats).
-            If a single string is passed, returns a list containing one vector.
+        Accepts a string or a list; always returns a list of vectors.
         """
         self._load()
 
